@@ -1,0 +1,2 @@
+DatabaseOptions:
+  ConnectionString: "Host=localhost;Username=postgres;Password=postgres;Database=core-db"

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/Local/">
+    <Project Path="Gen4.Local.Init/Gen4.Local.Init.csproj" Id="c9b10028-298a-4a82-9a9a-4a9929c78337" />
+    <Project Path="Gen4.Local/Gen4.Local.csproj" Id="9e1a4b6a-7943-4eb9-869e-c12cf699d444" />
+  </Folder>
+  <Folder Name="/Services/">
+    <Project Path="../../../../../Shared/Repos/gen4.hp.core.srv/src/Gen4.HP.Core.API/Gen4.HP.Core.API.csproj" />
+    <Project Path="../../../../../Shared/Repos/gen4.hp.his.srv/src/Gen4.HP.HIS.API/Gen4.HP.HIS.API.csproj" />
+    <Project Path="../../../../../Shared/Repos/gen4.hp.master.cli/src/Gen4.HP.Master.CLI/Gen4.HP.Master.CLI.csproj" />
+    <Project Path="../../../../../Shared/Repos/gen4.hp.styx.srv/src/Gen4.HP.Styx.API/Gen4.HP.Styx.API.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,24 @@
+﻿<Project Sdk="Aspire.AppHost.Sdk/13.5.3">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <UserSecretsId>7194994a-1229-412b-a201-22138846310f</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Nats" Version="13.5.4" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.core.srv\src\Gen4.HP.Core.API\Gen4.HP.Core.API.csproj" />
+    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.his.srv\src\Gen4.HP.HIS.API\Gen4.HP.HIS.API.csproj" />
+    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.styx.srv\src\Gen4.HP.Styx.API\Gen4.HP.Styx.API.csproj" />
+    <ProjectReference Include="..\Gen4.Local.Init\Gen4.Local.Init.csproj" />
+  </ItemGroup>
+
+</Project>
