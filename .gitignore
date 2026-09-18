@@ -2,3 +2,5 @@
 **/bin/
 **/.idea/
 **/.vs/
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

@@ -1,0 +1,34 @@
+info: Aspire.Hosting.DistributedApplication[0]
+      Aspire AppHost version: 13.5.4+9c1b401dd67746739044f68959cbf4d3d7af93a6
+info: Aspire.Hosting.DistributedApplication[0]
+      Distributed application starting.
+info: Aspire.Hosting.DistributedApplication[0]
+      Application host directory is: C:\Users\user2\Documents\Projects\Gen4.Local\Gen4.Local
+info: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[63]
+      User profile is available. Using 'C:\Users\user2\AppData\Local\ASP.NET\DataProtection-Keys' as key repository and Windows DPAPI to encrypt keys at rest.
+info: Aspire.Hosting.Dcp.DcpHost[0]
+      Starting DCP with arguments: start-apiserver --monitor 23628 --detach --kubeconfig "C:\Users\user2\AppData\Local\Temp\aspire-dcprqswxgjm.ibb\kubeconfig" --tls-cert-thumbprint "28F4ECDB4832F236C51F7D400A187B17ED6B15B8"
+info: Aspire.Hosting.DistributedApplication[0]
+      Generating a dynamic url for dashboard.  If you want a consistent url, configure `ASPNETCORE_URLS`
+info: Aspire.Hosting.DistributedApplication[0]
+      Now listening on: https://localhost:64538
+info: Aspire.Hosting.DistributedApplication[0]
+      Login to the dashboard at https://localhost:64538/login?t=4fd3b0d047a021dfd3dd4c10951c7ff3
+info: Aspire.Hosting.DistributedApplication[0]
+      Aspire Dashboard
+
+      - Dashboard:  https://localhost:64538
+      - Login URL:  https://localhost:64538/login?t=4fd3b0d047a021dfd3dd4c10951c7ff3
+      - OTLP/gRPC:  https://localhost:64537
+      - OTLP/HTTP:  https://localhost:64535
+
+info: NATS.Client.Core.NatsConnection[1001]
+      Connect to NATS using TcpFactory nats://nats:***@localhost:4222
+info: NATS.Client.Core.Internal.NatsReadProtocolProcessor[1005]
+      Received server info: ServerInfo { Id = NBIP7CDDC54ZWYJHQPNQULU3AWP5PB57YSQ4YYDA66CDJSW6ESFJYXJR, Name = NBIP7CDDC54ZWYJHQPNQULU3AWP5PB57YSQ4YYDA66CDJSW6ESFJYXJR, Version = 2.14.7, ProtocolVersion = 1, GitCommit = 8d8b69a, GoVersion = go1.26.8, Host = 0.0.0.0, Port = 4222, HeadersSupported = True, AuthRequired = True, TlsRequired = False, TlsVerify = False, TlsAvailable = False, MaxPayload = 1048576, JetStreamAvailable = True, ClientId = 5, ClientIp = 172.18.0.1, Nonce = , Cluster = , ClusterDynamic = False, ClientConnectUrls = , WebSocketConnectUrls = , LameDuckMode = False }
+info: NATS.Client.Core.Internal.NatsReadProtocolProcessor[1005]
+      Received server info: ServerInfo { Id = NBIP7CDDC54ZWYJHQPNQULU3AWP5PB57YSQ4YYDA66CDJSW6ESFJYXJR, Name = NBIP7CDDC54ZWYJHQPNQULU3AWP5PB57YSQ4YYDA66CDJSW6ESFJYXJR, Version = 2.14.7, ProtocolVersion = 1, GitCommit = 8d8b69a, GoVersion = go1.26.8, Host = 0.0.0.0, Port = 4222, HeadersSupported = True, AuthRequired = True, TlsRequired = False, TlsVerify = False, TlsAvailable = False, MaxPayload = 1048576, JetStreamAvailable = True, ClientId = 5, ClientIp = 172.18.0.1, Nonce = , Cluster = , ClusterDynamic = False, ClientConnectUrls = , WebSocketConnectUrls = , LameDuckMode = False }
+info: NATS.Client.Core.NatsConnection[1001]
+      Connect succeed NATS .NET Client, NATS nats://nats:***@localhost:4222
+info: Aspire.Hosting.DistributedApplication[0]
+      Distributed application started. Press Ctrl+C to shut down.

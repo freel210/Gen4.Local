@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 
+return;
+
 var masterCliPath = @"C:\Shared\Repos\gen4.hp.master.cli\src\Gen4.HP.Master.CLI\Gen4.HP.Master.CLI.csproj";
 
 var commands = new[]
@@ -14,7 +16,7 @@ var commands = new[]
 int exitCode = 0;
 foreach (var cmd in commands)
 {
-    Console.WriteLine($"\n>>> Running Master.CLI: {cmd}");
+    Console.WriteLine($"\n{cmd}");
     exitCode = RunDotNetRun(masterCliPath, cmd);
 
     if (exitCode != 0)
@@ -24,7 +26,7 @@ foreach (var cmd in commands)
     }
 }
 
-Console.WriteLine("\n=== Initialization Completed Successfully ===");
+Console.WriteLine("Done");
 Environment.Exit(0);
 
 static int RunDotNetRun(string projectPath, string arguments)

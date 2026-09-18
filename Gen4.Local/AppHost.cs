@@ -24,35 +24,58 @@ var tempPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Temp";
 
 Directory.CreateDirectory(tempPath);
 
-var initJob = builder.AddProject<Projects.Gen4_Local_Init>("init-job")
+var initJob = builder.AddProject<Projects.Gen4_Local_Init>("init-job");
+var hisApi = builder.AddProject<Projects.Gen4_HP_HIS_API>("his-api");
+var coreApi = builder.AddProject<Projects.Gen4_HP_Core_API>("core-api");
+var styxApi = builder.AddProject<Projects.Gen4_HP_Styx_API>("styx-api");
+
+initJob
     .WithEnvironment("GEN4HP_CONFIGROOT", configPath)
     .WithEnvironment("GEN4HP_CERTSROOT", certsPath)
     .WaitFor(postgres)
     .WaitFor(nats);
 
-var hisApi = builder.AddProject<Projects.Gen4_HP_HIS_API>("his-api")
+hisApi
     .WithEnvironment("CONFIG_ROOT", configPath)
     .WithEnvironment("CERTS_ROOT", certsPath)
-    .WithEnvironment("HIS_CORE_ENDPOINT", "core-api:5100")
-    .WithEndpoint(port: 5200, scheme: "https")
+    .WithEnvironment("HIS_CORE_ENDPOINT", coreApi.GetEndpoint("https").HostPort())
+    .WithEndpoint(port: 5200, scheme: "https", isProxied: false)
     .WaitForCompletion(initJob);
 
-var coreApi = builder.AddProject<Projects.Gen4_HP_Core_API>("core-api")
+coreApi
     .WithEnvironment("CONFIG_ROOT", configPath)
     .WithEnvironment("CERTS_ROOT", certsPath)
     .WithEnvironment("CORE_TEMP_DIR", tempPath)
-    .WithEnvironment("HIS_ENDPOINT", "his-api:5200")
-    .WithEnvironment("STYX_ENDPOINT", "styx-api:5001")
-    .WithEndpoint(port: 5100, scheme: "https")
+    .WithEnvironment("HIS_ENDPOINT", hisApi.GetEndpoint("https").HostPort())
+    .WithEnvironment("STYX_ENDPOINT", styxApi.GetEndpoint("grpc").HostPort())
+    .WithEndpoint(port: 5100, scheme: "https", isProxied: false)
     .WaitForCompletion(initJob);
 
-var styxApi = builder.AddProject<Projects.Gen4_HP_Styx_API>("styx-api")
+styxApi
     .WithEnvironment("CERTS_ROOT", certsPath)
     .WithEnvironment("STYX_HTTPS_PORT", "5050")
-    .WithEnvironment("CORE_ENDPOINT", "core-api:5100")
-    .WithEnvironment("HIS_ENDPOINT", "his-api:5200")
-    .WithEndpoint(port: 5050, scheme: "https", name: "https")
-    .WithEndpoint(port: 5001, scheme: "https", name: "grpc")
+    .WithEnvironment("CORE_ENDPOINT", coreApi.GetEndpoint("https").HostPort())
+    .WithEnvironment("HIS_ENDPOINT", hisApi.GetEndpoint("https").HostPort())
+    .WithEndpoint(port: 5050, scheme: "https", name: "https", isProxied: false)
+    .WithEndpoint(port: 5001, scheme: "https", name: "grpc", isProxied: false)
     .WaitForCompletion(initJob);
 
+var styxHttps = styxApi.GetEndpoint("https");
+
+var smokeTest = builder.AddProject<Projects.Gen4_Local_SmokeTest>("smoke-test")
+    .WithEnvironment("STYX_URL", ReferenceExpression.Create($"https://{styxHttps.Property(EndpointProperty.Host)}:{styxHttps.Property(EndpointProperty.Port)}"))
+    .WithEnvironment("CERTS_ROOT", certsPath)
+    .WithEnvironment("HIS_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=his-db")
+    .WithEnvironment("CORE_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=core-db")
+    .WaitFor(styxApi);
+
 builder.Build().Run();
+
+public static class EndpointReferenceExtensions
+{
+    public static ReferenceExpression HostPort(this EndpointReference endpoint)
+    {
+        return ReferenceExpression.Create(
+            $"{endpoint.Property(EndpointProperty.Host)}:{endpoint.Property(EndpointProperty.Port)}");
+    }
+}
