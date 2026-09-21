@@ -1,0 +1,53 @@
+LoggerOptions:
+  LogLevel: Information
+  LogFormat: verbose
+  UseColors: true
+
+ListenOptions:
+  DmzEndpoints:
+    - 0.0.0.0:5602
+  PublicEndpoints:
+    - 0.0.0.0:5601
+
+PublicKeyRepositoryOptions:
+  PublicKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
+
+MongoDbOptions:
+  "ConnectionString": 'mongodb://root:Passw0rd123@localhost:27018'
+  "DatabaseName": 'Lyra3CoreDb'
+
+ActualSurgeriesRegistryServiceOptions:
+  KeepAliveInterval: 10000
+  SurgeryRemovalTimeout: 1200
+
+HospitalPlatformOptions:
+  AuthAppUri: http://127.0.0.1:5052
+  JumboAppUri: http://127.0.0.1:5042
+  PacsUri: http://192.168.57.9:3322
+  AppInstanceId: Lyra3.HP.Core
+
+RedisServiceOptions:
+  ConnectionString: localhost:6380,password=Passw0rd123
+
+AuditOptions:
+  AuditId: Core
+
+RabbitMQClientOptions:
+  RabbitMQServiceUri: amqp://lyra3:Passw0rd123@localhost:5673
+
+PacsOptions:
+  Url: http://localhost:1234
+  PacsDicomAddress: http://localhost:1235
+  UseDicom: false
+
+CertificateServiceOptions:
+  CertificatesFolderPath: "C:\\Users\\user2\\Documents\\Projects\\Gen4.Local\\Lyra3\\Certs"
+  ApplyCertificateCommandName: ""
+  ApplyCertificateCommandTimeout: 60
+
+PackhausOptions:
+  Url: http://127.0.0.1:5062
+
+VideoDownloadsOptions:
+  ExpirationCheckInterval: 6
+  ICUBucketName: "foo"

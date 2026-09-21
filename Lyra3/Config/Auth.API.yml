@@ -1,0 +1,37 @@
+LoggerOptions:
+  LogLevel: information
+  LogFormat: verbose
+  UseColors: true
+
+ListenOptions:
+  DmzEndpoints:
+    - 0.0.0.0:5052
+  PublicEndpoints:
+    - 0.0.0.0:5051
+
+PublicKeyRepositoryOptions:
+  PublicKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
+
+PrivateKeyRepositoryOptions:
+  PrivateKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\privateKey.txt
+
+JwtServiceOptions:
+  AccessTokenTTL: 600
+  RefreshTokenTTL: 1200
+
+MongoDbOptions:
+  "ConnectionString": 'mongodb://root:Passw0rd123@localhost:27018'
+  "DatabaseName": 'Lyra3CoreDb'
+
+RedisServiceOptions:
+  ConnectionString: localhost:6380,password=Passw0rd123
+
+AuditOptions:
+  AuditId: Auth
+
+RabbitMQClientOptions:
+  RabbitMQServiceUri: amqp://lyra3:Passw0rd123@localhost:5673
+
+HospitalPlatformOptions:
+  PlatformUri: http://127.0.0.1:5602
+  AppInstanceId: Lyra3.HP.Auth
