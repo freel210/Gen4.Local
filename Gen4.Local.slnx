@@ -1,25 +1,24 @@
 <Solution>
   <Folder Name="/Local/">
-    <Project Path="Gen4.Local.Init/Gen4.Local.Init.csproj" Id="c9b10028-298a-4a82-9a9a-4a9929c78337" />
-    <Project Path="Gen4.Local.Lyra3Seed/Gen4.Local.Lyra3Seed.csproj" Id="b3a7f9d1-5f2e-4a3d-8c1b-9e0f2a4d6b8c" />
-    <Project Path="Gen4.Local.SmokeTest/Gen4.Local.SmokeTest.csproj" Id="8d56b1c2-3d4a-4f6b-9c7d-1a2b3c4d5e6f" />
-    <Project Path="Gen4.Local/Gen4.Local.csproj" Id="9e1a4b6a-7943-4eb9-869e-c12cf699d444" />
+    <Project Path="Gen4.Local.Init/Gen4.Local.Init.csproj" Type="C#" />
+    <Project Path="Gen4.Local.Lyra3Seed/Gen4.Local.Lyra3Seed.csproj" Type="C#" />
+    <Project Path="Gen4.Local.SmokeTest/Gen4.Local.SmokeTest.csproj" Type="C#" />
+    <Project Path="Gen4.Local/Gen4.Local.csproj" Type="C#" />
+  </Folder>
+  <Folder Name="/Lyra3/" />
+  <Folder Name="/Lyra3/Audit.API/">
+    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Audit.API/Src/Src.csproj" Type="C#" />
+  </Folder>
+  <Folder Name="/Lyra3/Auth.API/">
+    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Auth.API/Src/Src.csproj" Type="C#" />
+  </Folder>
+  <Folder Name="/Lyra3/Core.API/">
+    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Core.API/Src/Src.csproj" Type="C#" />
   </Folder>
   <Folder Name="/Services/">
-    <Project Path="../../../../../Shared/Repos/gen4.hp.core.srv/src/Gen4.HP.Core.API/Gen4.HP.Core.API.csproj" />
-    <Project Path="../../../../../Shared/Repos/gen4.hp.his.srv/src/Gen4.HP.HIS.API/Gen4.HP.HIS.API.csproj" />
-    <Project Path="../../../../../Shared/Repos/gen4.hp.master.cli/src/Gen4.HP.Master.CLI/Gen4.HP.Master.CLI.csproj" />
-    <Project Path="../../../../../Shared/Repos/gen4.hp.styx.srv/src/Gen4.HP.Styx.API/Gen4.HP.Styx.API.csproj" />
-  </Folder>
-  <Folder Name="/Lyra3/">
-    <Folder Name="/Lyra3/Audit.API/">
-      <Project Path="../../../../../Shared/Repos/Lyra3.HP.Audit.API/Src/Src.csproj" />
-    </Folder>
-    <Folder Name="/Lyra3/Auth.API/">
-      <Project Path="../../../../../Shared/Repos/Lyra3.HP.Auth.API/Src/Src.csproj" />
-    </Folder>
-    <Folder Name="/Lyra3/Core.API/">
-      <Project Path="../../../../../Shared/Repos/Lyra3.HP.Core.API/Src/Src.csproj" />
-    </Folder>
+    <Project Path="../../../../../Shared/Repos/gen4.hp.core.srv/src/Gen4.HP.Core.API/Gen4.HP.Core.API.csproj" Type="C#" />
+    <Project Path="../../../../../Shared/Repos/gen4.hp.his.srv/src/Gen4.HP.HIS.API/Gen4.HP.HIS.API.csproj" Type="C#" />
+    <Project Path="../../../../../Shared/Repos/gen4.hp.master.cli/src/Gen4.HP.Master.CLI/Gen4.HP.Master.CLI.csproj" Type="C#" />
+    <Project Path="../../../../../Shared/Repos/gen4.hp.styx.srv/src/Gen4.HP.Styx.API/Gen4.HP.Styx.API.csproj" Type="C#" />
   </Folder>
 </Solution>
