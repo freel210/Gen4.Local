@@ -76,6 +76,7 @@ hisApi
     .WithEnvironment("CERTS_ROOT", certsPath)
     .WithEnvironment("HIS_CORE_ENDPOINT", coreApi.GetEndpoint("https").HostPort())
     .WithEndpoint(port: 5200, scheme: "https", isProxied: false)
+    .WaitFor(coreApi)
     .WaitForCompletion(initJob);
 
 coreApi
@@ -98,13 +99,6 @@ styxApi
 
 var styxHttps = styxApi.GetEndpoint("https");
 
-var smokeTest = builder.AddProject<Projects.Gen4_Local_SmokeTest>("smoke-test")
-    .WithEnvironment("STYX_URL", ReferenceExpression.Create($"https://{styxHttps.Property(EndpointProperty.Host)}:{styxHttps.Property(EndpointProperty.Port)}"))
-    .WithEnvironment("CERTS_ROOT", certsPath)
-    .WithEnvironment("HIS_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=his-db")
-    .WithEnvironment("CORE_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=core-db")
-    .WaitFor(styxApi);
-
 var lyra3ConfigPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Config";
 
 var lyra3Seed = builder.AddProject<Projects.Gen4_Local_Lyra3Seed>("lyra3-seed")
@@ -116,7 +110,7 @@ var lyra3Auth = builder.AddExecutable("lyra3-auth", "dotnet",
         @"C:\Shared\Repos\Lyra3.HP.Auth.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Auth.API.dll")
     .WithEnvironment("MVS_LYRA3_AUTH_API_SRC", Path.Combine(lyra3ConfigPath, "Auth.API.yml"))
     .WithEndpoint(port: 5052, targetPort: 5052, name: "dmz", isProxied: false)
-    .WithEndpoint(port: 5051, targetPort: 5051, name: "public", isProxied: false)
+    .WithEndpoint(port: 3304, targetPort: 3304, name: "public", isProxied: false)
     .WaitForCompletion(lyra3Seed)
     .WaitFor(mongo)
     .WaitFor(redis)
@@ -127,13 +121,24 @@ var lyra3Core = builder.AddExecutable("lyra3-core", "dotnet",
         @"C:\Shared\Repos\Lyra3.HP.Core.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Core.API.dll")
     .WithEnvironment("MVS_LYRA3_CORE_API_SRC", Path.Combine(lyra3ConfigPath, "Core.API.yml"))
     .WithEndpoint(port: 5602, targetPort: 5602, name: "dmz", isProxied: false)
-    .WithEndpoint(port: 5601, targetPort: 5601, name: "public", isProxied: false)
+    .WithEndpoint(port: 3302, targetPort: 3302, name: "public", isProxied: false)
     .WaitForCompletion(lyra3Seed)
     .WaitFor(mongo)
     .WaitFor(redis)
     .WaitFor(rabbitmq)
     .WaitFor(lyra3Auth)
     .WaitFor(s3Storage);
+
+var smokeTest = builder.AddProject<Projects.Gen4_Local_SmokeTest>("smoke-test")
+    .WithEnvironment("STYX_URL", ReferenceExpression.Create($"https://{styxHttps.Property(EndpointProperty.Host)}:{styxHttps.Property(EndpointProperty.Port)}"))
+    .WithEnvironment("CERTS_ROOT", certsPath)
+    .WithEnvironment("HIS_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=his-db")
+    .WithEnvironment("CORE_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=core-db")
+    .WithEnvironment("LYRA3_CORE_URL", "http://localhost:3302")
+    .WithEnvironment("LYRA3_MONGO_CONNECTION", mongo.Resource.ConnectionStringExpression)
+    .WaitFor(styxApi)
+    .WaitFor(lyra3Seed)
+    .WaitFor(lyra3Core);
 
 builder.Build().Run();
 

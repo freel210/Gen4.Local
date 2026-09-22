@@ -36,6 +36,8 @@ public static class SmokeTestRunner
             userToken = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/user", TestData.UserLogin, TestData.Password);
         }, "Core login", logger);
 
+        await CheckLyra3CoreAsync(config, userToken, logger);
+
         styx.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
 
         logger.Info("Connecting to notifications hub...");
@@ -78,6 +80,30 @@ public static class SmokeTestRunner
         }
 
         return 0;
+    }
+
+    private static async Task CheckLyra3CoreAsync(SmokeTestConfig config, string userToken, ConsoleLogger logger)
+    {
+        logger.Info("LYRA3_CORE: {0}", config.Lyra3CoreUrl);
+
+        using var lyra3Core = new HttpClient
+        {
+            BaseAddress = new Uri(config.Lyra3CoreUrl),
+        };
+        lyra3Core.DefaultRequestHeaders.Authorization = new("Bearer", userToken);
+
+        await RetryAsync(async () =>
+        {
+            var from = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd");
+            var to = DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd");
+            using var response = await lyra3Core.GetAsync($"/api/finishedSurgeries?Limit=1&PageNumber=1&From={from}&To={to}");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"Lyra3 core responded with {(int)response.StatusCode} {response.ReasonPhrase}.");
+            }
+
+            logger.Info("Lyra3 core FinishedSurgeries endpoint OK.");
+        }, "Lyra3 core FinishedSurgeries check", logger);
     }
 
     private static async Task<bool> CheckEnvironmentReadyAsync(HttpClient styx, ConsoleLogger logger)

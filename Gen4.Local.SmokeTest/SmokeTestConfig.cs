@@ -4,7 +4,9 @@ public sealed record SmokeTestConfig(
     string StyxUrl,
     string CertsRoot,
     string HisDbConnection,
-    string CoreDbConnection)
+    string CoreDbConnection,
+    string Lyra3CoreUrl,
+    string Lyra3MongoConnection)
 {
     public static SmokeTestConfig FromEnvironment()
     {
@@ -12,7 +14,9 @@ public sealed record SmokeTestConfig(
             Environment.GetEnvironmentVariable("STYX_URL") ?? "https://localhost:5050",
             Environment.GetEnvironmentVariable("CERTS_ROOT") ?? @"C:\Users\user2\Documents\Projects\Gen4.Local\Certs",
             Environment.GetEnvironmentVariable("HIS_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=his-db",
-            Environment.GetEnvironmentVariable("CORE_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=core-db");
+            Environment.GetEnvironmentVariable("CORE_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=core-db",
+            Environment.GetEnvironmentVariable("LYRA3_CORE_URL") ?? "http://localhost:3302",
+            Environment.GetEnvironmentVariable("LYRA3_MONGO_CONNECTION") ?? "mongodb://root:Passw0rd123@localhost:27018");
     }
 }
 

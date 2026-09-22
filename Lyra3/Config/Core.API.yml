@@ -7,7 +7,7 @@ ListenOptions:
   DmzEndpoints:
     - 0.0.0.0:5602
   PublicEndpoints:
-    - 0.0.0.0:5601
+    - 0.0.0.0:3302
 
 PublicKeyRepositoryOptions:
   PublicKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt

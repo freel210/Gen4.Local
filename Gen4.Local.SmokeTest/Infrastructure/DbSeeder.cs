@@ -1,3 +1,5 @@
+using MongoDB.Bson;
+using MongoDB.Driver;
 using Npgsql;
 
 namespace Gen4.Local.SmokeTest.Infrastructure;
@@ -8,60 +10,56 @@ public static class DbSeeder
 {
     public static async Task<SeededData> SeedAsync(SmokeTestConfig config, ConsoleLogger logger)
     {
-        logger.Info("Seeding core database (admin + user)...");
-        await SeedCoreAsync(config.CoreDbConnection);
+        logger.Info("Seeding Lyra3 core database (admin + user)...");
+        await SeedLyra3CoreAsync(config.Lyra3MongoConnection);
 
         logger.Info("Seeding his database (diagnosis + patient, cleaning leftovers)...");
         return await SeedHisAsync(config.HisDbConnection);
     }
 
-    private static async Task SeedCoreAsync(string connectionString)
+    private static async Task SeedLyra3CoreAsync(string connectionString)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync();
+        var client = new MongoClient(connectionString);
+        var db = client.GetDatabase("Lyra3CoreDb");
+        var accounts = db.GetCollection<BsonDocument>("accounts");
 
-        await using (var cmd = new NpgsqlCommand("""
-            DELETE FROM users WHERE login IN (@admin, @user);
-            DELETE FROM administrators WHERE login = @admin;
-            """, connection))
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(TestData.Password);
+
+        await UpsertAccountAsync(accounts, new BsonDocument
         {
-            cmd.Parameters.AddWithValue("@admin", TestData.AdminLogin);
-            cmd.Parameters.AddWithValue("@user", TestData.UserLogin);
-            await cmd.ExecuteNonQueryAsync();
+            { "type", "Administrator" },
+            { "login", TestData.AdminLogin },
+            { "passwordHash", passwordHash },
+            { "isEnabled", true },
+        });
+
+        await UpsertAccountAsync(accounts, new BsonDocument
+        {
+            { "type", "User" },
+            { "login", TestData.UserLogin },
+            { "passwordHash", passwordHash },
+            { "isEnabled", true },
+            { "roles", new BsonArray { "User" } },
+        });
+    }
+
+    private static string AccountId(string login)
+    {
+        var hash = System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(login));
+        return new Guid(hash).ToString();
+    }
+
+    private static async Task UpsertAccountAsync(IMongoCollection<BsonDocument> accounts, BsonDocument account)
+    {
+        var login = account["login"].AsString;
+        var filter = Builders<BsonDocument>.Filter.Eq("login", login);
+        var update = Builders<BsonDocument>.Update.SetOnInsert("_id", AccountId(login));
+        foreach (var element in account.Elements)
+        {
+            update = update.Set(element.Name, element.Value);
         }
 
-        var adminHash = BCrypt.Net.BCrypt.HashPassword(TestData.Password, 12);
-        await using (var cmd = new NpgsqlCommand("""
-            INSERT INTO administrators (login, password_hash, is_enabled)
-            VALUES (@login, @hash, true);
-            """, connection))
-        {
-            cmd.Parameters.AddWithValue("@login", TestData.AdminLogin);
-            cmd.Parameters.AddWithValue("@hash", adminHash);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        Guid profileId;
-        await using (var cmd = new NpgsqlCommand("""
-            INSERT INTO user_profiles (roles)
-            VALUES (ARRAY[]::client_role[])
-            RETURNING id;
-            """, connection))
-        {
-            profileId = (Guid)(await cmd.ExecuteScalarAsync())!;
-        }
-
-        var userHash = BCrypt.Net.BCrypt.HashPassword(TestData.Password, 12);
-        await using (var cmd = new NpgsqlCommand("""
-            INSERT INTO users (login, password_hash, profile_id, is_enabled)
-            VALUES (@login, @hash, @profileId, true);
-            """, connection))
-        {
-            cmd.Parameters.AddWithValue("@login", TestData.UserLogin);
-            cmd.Parameters.AddWithValue("@hash", userHash);
-            cmd.Parameters.AddWithValue("@profileId", profileId);
-            await cmd.ExecuteNonQueryAsync();
-        }
+        await accounts.UpdateOneAsync(filter, update, new UpdateOptions { IsUpsert = true });
     }
 
     private static async Task<SeededData> SeedHisAsync(string connectionString)
