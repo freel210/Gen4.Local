@@ -8,7 +8,7 @@ var commands = new[]
 {
     "--migrate-core-database",
     "--migrate-his-database",
-    "--generate-rsa-keys",
+    @"--import-rsa-keys C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\privateKey.txt C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt",
     "--set-nats-endpoint nats:nats@127.0.0.1:4222",
     "--generate-master-password"
 };
