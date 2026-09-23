@@ -26,6 +26,32 @@ public static class TestData
     public const string UserLogin = "smoketest.user";
     public const string Password = "smoketest";
 
+    public static readonly string[] ExpectedUserRoles =
+    [
+        "EmployeesView",
+        "EmployeesCreate",
+        "EmployeesDelete",
+        "EmployeesEdit",
+        "PatientsView",
+        "PatientsCreate",
+        "PatientsDelete",
+        "PatientsEdit",
+        "DirectoriesView",
+        "SurgeryTypesCreate",
+        "SurgeryTypesDelete",
+        "SurgeryTypesEdit",
+        "SurgeryRolesCreate",
+        "SurgeryRolesDelete",
+        "SurgeryRolesEdit",
+        "SpecialitiesCreate",
+        "SpecialitiesDelete",
+        "SpecialitiesEdit",
+        "PlannedSurgeriesView",
+        "PlannedSurgeriesCreate",
+        "PlannedSurgeriesEdit",
+        "PlannedSurgeriesDelete",
+    ];
+
     public const string ConstitutionMarker = "smoketest";
     public const string DiagnosisCode = "SMKT";
     public const string DiagnosisName = "Smoke test diagnosis";

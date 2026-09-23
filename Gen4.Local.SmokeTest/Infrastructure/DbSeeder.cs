@@ -39,7 +39,7 @@ public static class DbSeeder
             { "login", TestData.UserLogin },
             { "passwordHash", passwordHash },
             { "isEnabled", true },
-            { "roles", new BsonArray { "User" } },
+            { "roles", new BsonArray { "User", "ArchiveEditor", "ConferenceParticipant", "IcuUser", "IcuUnitEditor", "WorkModeUser", "WorkModeEditor" } },
         });
     }
 

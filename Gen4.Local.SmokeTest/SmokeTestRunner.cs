@@ -28,15 +28,31 @@ public static class SmokeTestRunner
             "Database seeding",
             logger);
 
-        string adminToken = string.Empty;
-        string userToken = string.Empty;
+        TokenResult adminBundle = null!;
+        TokenResult userBundle = null!;
         await RetryAsync(async () =>
         {
-            adminToken = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/admin", TestData.AdminLogin, TestData.Password);
-            userToken = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/user", TestData.UserLogin, TestData.Password);
+            adminBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/admin", TestData.AdminLogin, TestData.Password);
+            userBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/user", TestData.UserLogin, TestData.Password);
         }, "Core login", logger);
 
-        await CheckLyra3CoreAsync(config, userToken, logger);
+        CheckUserToken(userBundle.AccessToken, "login user token", logger);
+        CheckAdminToken(adminBundle.AccessToken, "login admin token", logger);
+
+        await CheckLyra3CoreAsync(config, userBundle.AccessToken, logger);
+
+        logger.Info("Refresh: POST /core/api/tokens/user/refresh");
+        userBundle = await CoreApiClient.RefreshAsync(styx, "user", userBundle.RefreshToken);
+        logger.Info("Refresh: POST /core/api/tokens/admin/refresh");
+        adminBundle = await CoreApiClient.RefreshAsync(styx, "admin", adminBundle.RefreshToken);
+
+        CheckUserToken(userBundle.AccessToken, "refreshed user token", logger);
+        CheckAdminToken(adminBundle.AccessToken, "refreshed admin token", logger);
+
+        await CheckLyra3CoreAsync(config, userBundle.AccessToken, logger);
+
+        var adminToken = adminBundle.AccessToken;
+        var userToken = userBundle.AccessToken;
 
         styx.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
 
@@ -104,6 +120,58 @@ public static class SmokeTestRunner
 
             logger.Info("Lyra3 core FinishedSurgeries endpoint OK.");
         }, "Lyra3 core FinishedSurgeries check", logger);
+    }
+
+    private static void CheckUserToken(string accessToken, string what, ConsoleLogger logger)
+    {
+        var claims = JwtInspector.Parse(accessToken);
+        ValidateCommon(claims, what);
+
+        var missing = TestData.ExpectedUserRoles
+            .Where(role => !claims.Roles.Contains(role, StringComparer.Ordinal))
+            .ToList();
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException($"{what}: missing ClientRole values: {string.Join(", ", missing)}.");
+        }
+
+        logger.Info("{0}: aud=lyra3, sub={1}, all {2} ClientRole values present.", what, claims.Subject, TestData.ExpectedUserRoles.Length);
+        logger.Info("  roles: {0}", string.Join(", ", claims.Roles.Distinct().OrderBy(role => role, StringComparer.Ordinal)));
+        logger.Info("  access token: {0}", accessToken);
+    }
+
+    private static void CheckAdminToken(string accessToken, string what, ConsoleLogger logger)
+    {
+        var claims = JwtInspector.Parse(accessToken);
+        ValidateCommon(claims, what);
+
+        var leaked = claims.Roles
+            .Where(role => TestData.ExpectedUserRoles.Contains(role, StringComparer.Ordinal))
+            .ToList();
+        if (leaked.Count > 0)
+        {
+            throw new InvalidOperationException($"{what}: admin token must not carry ClientRole values, found: {string.Join(", ", leaked)}.");
+        }
+
+        logger.Info("{0}: aud=lyra3, sub={1}, no ClientRole values.", what, claims.Subject);
+    }
+
+    private static void ValidateCommon(JwtClaims claims, string what)
+    {
+        if (!string.Equals(claims.Audience, "lyra3", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"{what}: aud is '{claims.Audience}', expected 'lyra3'.");
+        }
+
+        if (string.IsNullOrEmpty(claims.Subject))
+        {
+            throw new InvalidOperationException($"{what}: sub claim is missing.");
+        }
+
+        if (claims.ExpiresAtUnix is not { } expiresAt || DateTimeOffset.FromUnixTimeSeconds(expiresAt) <= DateTimeOffset.UtcNow)
+        {
+            throw new InvalidOperationException($"{what}: exp claim is missing or already expired.");
+        }
     }
 
     private static async Task<bool> CheckEnvironmentReadyAsync(HttpClient styx, ConsoleLogger logger)

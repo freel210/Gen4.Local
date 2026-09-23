@@ -11,6 +11,7 @@ public static class Tls
 
         return new HttpClientHandler
         {
+            UseCookies = false,
             ServerCertificateCustomValidationCallback = (_, certificate, chain, _) =>
                 IsTrusted(certificate, chain, rootCa),
         };
