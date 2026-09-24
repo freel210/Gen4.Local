@@ -18,11 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.core.srv\src\Gen4.HP.Core.API\Gen4.HP.Core.API.csproj" />
-    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.his.srv\src\Gen4.HP.HIS.API\Gen4.HP.HIS.API.csproj" />
-    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.styx.srv\src\Gen4.HP.Styx.API\Gen4.HP.Styx.API.csproj" />
-    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Auth.API\Src\Src.csproj" />
-    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Core.API\Src\Src.csproj" />
+    <ProjectReference Include="..\..\gen4.hp.core.srv\src\Gen4.HP.Core.API\Gen4.HP.Core.API.csproj" />
+    <ProjectReference Include="..\..\gen4.hp.his.srv\src\Gen4.HP.HIS.API\Gen4.HP.HIS.API.csproj" />
+    <ProjectReference Include="..\..\gen4.hp.master.cli\src\Gen4.HP.Master.CLI\Gen4.HP.Master.CLI.csproj" />
+    <ProjectReference Include="..\..\gen4.hp.styx.srv\src\Gen4.HP.Styx.API\Gen4.HP.Styx.API.csproj" />
     <ProjectReference Include="..\Gen4.Local.Init\Gen4.Local.Init.csproj" />
     <ProjectReference Include="..\Gen4.Local.Lyra3Seed\Gen4.Local.Lyra3Seed.csproj" />
     <ProjectReference Include="..\Gen4.Local.SmokeTest\Gen4.Local.SmokeTest.csproj" />

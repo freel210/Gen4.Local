@@ -10,7 +10,7 @@ ListenOptions:
     - 0.0.0.0:3302
 
 PublicKeyRepositoryOptions:
-  PublicKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
+  PublicKeyPemFilePath: D:\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
 
 MongoDbOptions:
   "ConnectionString": 'mongodb://root:Passw0rd123@localhost:27018'
@@ -41,7 +41,7 @@ PacsOptions:
   UseDicom: false
 
 CertificateServiceOptions:
-  CertificatesFolderPath: "C:\\Users\\user2\\Documents\\Projects\\Gen4.Local\\Lyra3\\Certs"
+  CertificatesFolderPath: "D:\\Projects\\Gen4.Local\\Lyra3\\Certs"
   ApplyCertificateCommandName: ""
   ApplyCertificateCommandTimeout: 60
 

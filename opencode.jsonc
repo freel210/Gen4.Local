@@ -4,7 +4,7 @@
     "aspire": {
       "type": "local",
       "command": ["aspire", "agent", "mcp"],
-      "cwd": "C:/Users/user2/Documents/Projects/Gen4.Local",
+      "cwd": "D:/Projects/Gen4.Local",
       "enabled": true,
       "timeout": 30000
     }

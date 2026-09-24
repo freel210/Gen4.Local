@@ -1,5 +1,18 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
+var repoDir = Directory.GetParent(builder.AppHostDirectory)!.FullName;
+var reposDir = Directory.GetParent(repoDir)!.FullName;
+var configPath = Path.Combine(repoDir, "Config");
+var certsPath = Path.Combine(repoDir, "Certs");
+var tempPath = Path.Combine(repoDir, "Temp");
+var lyra3Root = Path.Combine(repoDir, "Lyra3");
+var lyra3ConfigPath = Path.Combine(lyra3Root, "Config");
+var s3InitScripts = Path.Combine(lyra3Root, "LocalStack", "init");
+var lyra3AuthSrc = Path.Combine(reposDir, "Lyra3.HP.Auth.API", "Src");
+var lyra3AuthDll = Path.Combine(lyra3AuthSrc, "bin", "Debug", "net8.0", "MVS.Lyra3.HP.Auth.API.dll");
+var lyra3CoreSrc = Path.Combine(reposDir, "Lyra3.HP.Core.API", "Src");
+var lyra3CoreDll = Path.Combine(lyra3CoreSrc, "bin", "Debug", "net8.0", "MVS.Lyra3.HP.Core.API.dll");
+
 var pgUser = builder.AddParameter("pg-user", "postgres");
 var pgPassword = builder.AddParameter("pg-password", "postgres");
 
@@ -42,8 +55,6 @@ var rabbitmq = builder.AddRabbitMQ("rabbitmq", userName: rabbitUser, password: r
 var s3AccessKey = builder.AddParameter("s3-access-key", "lyra3");
 var s3SecretKey = builder.AddParameter("s3-secret-key", "Passw0rd123");
 
-var s3InitScripts = @"C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\LocalStack\init";
-
 var s3Storage = builder.AddContainer("s3-storage", "gresau/localstack-persist", "4.14.0")
     .WithEnvironment("SERVICES", "s3")
     .WithEnvironment("AWS_ACCESS_KEY_ID", s3AccessKey.Resource.Value)
@@ -53,10 +64,6 @@ var s3Storage = builder.AddContainer("s3-storage", "gresau/localstack-persist", 
     .WithVolume("localstack-persist-data", "/persisted-data")
     .WithBindMount(s3InitScripts, "/etc/localstack/init/ready.d")
     .WithEndpoint(port: 4566, targetPort: 4566, name: "s3");
-
-var configPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Config";
-var certsPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Certs";
-var tempPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Temp";
 
 Directory.CreateDirectory(tempPath);
 
@@ -99,15 +106,13 @@ styxApi
 
 var styxHttps = styxApi.GetEndpoint("https");
 
-var lyra3ConfigPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Config";
-
 var lyra3Seed = builder.AddProject<Projects.Gen4_Local_Lyra3Seed>("lyra3-seed")
     .WithEnvironment("LYRA3_MONGO_CONNECTION", mongo.Resource.ConnectionStringExpression)
     .WaitFor(mongo);
 
 var lyra3Auth = builder.AddExecutable("lyra3-auth", "dotnet",
-        @"C:\Shared\Repos\Lyra3.HP.Auth.API\Src",
-        @"C:\Shared\Repos\Lyra3.HP.Auth.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Auth.API.dll")
+        lyra3AuthSrc,
+        lyra3AuthDll)
     .WithEnvironment("MVS_LYRA3_AUTH_API_SRC", Path.Combine(lyra3ConfigPath, "Auth.API.yml"))
     .WithEndpoint(port: 5052, targetPort: 5052, name: "dmz", isProxied: false)
     .WithEndpoint(port: 3304, targetPort: 3304, name: "public", isProxied: false)
@@ -117,8 +122,8 @@ var lyra3Auth = builder.AddExecutable("lyra3-auth", "dotnet",
     .WaitFor(rabbitmq);
 
 var lyra3Core = builder.AddExecutable("lyra3-core", "dotnet",
-        @"C:\Shared\Repos\Lyra3.HP.Core.API\Src",
-        @"C:\Shared\Repos\Lyra3.HP.Core.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Core.API.dll")
+        lyra3CoreSrc,
+        lyra3CoreDll)
     .WithEnvironment("MVS_LYRA3_CORE_API_SRC", Path.Combine(lyra3ConfigPath, "Core.API.yml"))
     .WithEndpoint(port: 5602, targetPort: 5602, name: "dmz", isProxied: false)
     .WithEndpoint(port: 3302, targetPort: 3302, name: "public", isProxied: false)

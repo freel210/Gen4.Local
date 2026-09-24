@@ -7,18 +7,18 @@
   </Folder>
   <Folder Name="/Lyra3/" />
   <Folder Name="/Lyra3/Audit.API/">
-    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Audit.API/Src/Src.csproj" Type="C#" />
+    <Project Path="../Lyra3.HP.Audit.API/Src/Src.csproj" Type="C#" />
   </Folder>
   <Folder Name="/Lyra3/Auth.API/">
-    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Auth.API/Src/Src.csproj" Type="C#" />
+    <Project Path="../Lyra3.HP.Auth.API/Src/Src.csproj" Type="C#" />
   </Folder>
   <Folder Name="/Lyra3/Core.API/">
-    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Core.API/Src/Src.csproj" Type="C#" />
+    <Project Path="../Lyra3.HP.Core.API/Src/Src.csproj" Type="C#" />
   </Folder>
   <Folder Name="/Services/">
-    <Project Path="../../../../../Shared/Repos/gen4.hp.core.srv/src/Gen4.HP.Core.API/Gen4.HP.Core.API.csproj" Type="C#" />
-    <Project Path="../../../../../Shared/Repos/gen4.hp.his.srv/src/Gen4.HP.HIS.API/Gen4.HP.HIS.API.csproj" Type="C#" />
-    <Project Path="../../../../../Shared/Repos/gen4.hp.master.cli/src/Gen4.HP.Master.CLI/Gen4.HP.Master.CLI.csproj" Type="C#" />
-    <Project Path="../../../../../Shared/Repos/gen4.hp.styx.srv/src/Gen4.HP.Styx.API/Gen4.HP.Styx.API.csproj" Type="C#" />
+    <Project Path="../gen4.hp.core.srv/src/Gen4.HP.Core.API/Gen4.HP.Core.API.csproj" Type="C#" />
+    <Project Path="../gen4.hp.his.srv/src/Gen4.HP.HIS.API/Gen4.HP.HIS.API.csproj" Type="C#" />
+    <Project Path="../gen4.hp.master.cli/src/Gen4.HP.Master.CLI/Gen4.HP.Master.CLI.csproj" Type="C#" />
+    <Project Path="../gen4.hp.styx.srv/src/Gen4.HP.Styx.API/Gen4.HP.Styx.API.csproj" Type="C#" />
   </Folder>
 </Solution>

@@ -4,3 +4,4 @@
 **/.vs/
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+/nuget.config

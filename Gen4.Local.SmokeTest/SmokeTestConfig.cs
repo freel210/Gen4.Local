@@ -12,11 +12,30 @@ public sealed record SmokeTestConfig(
     {
         return new SmokeTestConfig(
             Environment.GetEnvironmentVariable("STYX_URL") ?? "https://localhost:5050",
-            Environment.GetEnvironmentVariable("CERTS_ROOT") ?? @"C:\Users\user2\Documents\Projects\Gen4.Local\Certs",
+            Environment.GetEnvironmentVariable("CERTS_ROOT") ?? SmokeTestPaths.DefaultCertsRoot(),
             Environment.GetEnvironmentVariable("HIS_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=his-db",
             Environment.GetEnvironmentVariable("CORE_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=core-db",
             Environment.GetEnvironmentVariable("LYRA3_CORE_URL") ?? "http://localhost:3302",
             Environment.GetEnvironmentVariable("LYRA3_MONGO_CONNECTION") ?? "mongodb://root:Passw0rd123@localhost:27018");
+    }
+}
+
+public static class SmokeTestPaths
+{
+    public static string DefaultCertsRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Gen4.Local.slnx")))
+        {
+            dir = dir.Parent;
+        }
+
+        if (dir == null)
+        {
+            throw new InvalidOperationException("Could not locate 'Gen4.Local.slnx' from the smoke test output directory.");
+        }
+
+        return Path.Combine(dir.FullName, "Certs");
     }
 }
 

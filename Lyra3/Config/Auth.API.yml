@@ -10,10 +10,10 @@ ListenOptions:
     - 0.0.0.0:3304
 
 PublicKeyRepositoryOptions:
-  PublicKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
+  PublicKeyPemFilePath: D:\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
 
 PrivateKeyRepositoryOptions:
-  PrivateKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\privateKey.txt
+  PrivateKeyPemFilePath: D:\Projects\Gen4.Local\Lyra3\Keys\privateKey.txt
 
 JwtServiceOptions:
   AccessTokenTTL: 600

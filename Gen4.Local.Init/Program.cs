@@ -8,15 +8,18 @@ if (!string.IsNullOrEmpty(connectionString))
     UpsertLyra3Options(connectionString);
 }
 
-return;
-
-var masterCliPath = @"C:\Shared\Repos\gen4.hp.master.cli\src\Gen4.HP.Master.CLI\Gen4.HP.Master.CLI.csproj";
+var repoDir = FindDirectoryUp(AppContext.BaseDirectory, "Gen4.Local.slnx");
+var reposDir = Path.GetDirectoryName(repoDir)!;
+var keysDir = Path.Combine(repoDir, "Lyra3", "Keys");
+var privateKeyPath = Path.Combine(keysDir, "privateKey.txt");
+var publicKeyPath = Path.Combine(keysDir, "publicKey.txt");
+var masterCliPath = Path.Combine(reposDir, "gen4.hp.master.cli", "src", "Gen4.HP.Master.CLI", "Gen4.HP.Master.CLI.csproj");
 
 var commands = new[]
 {
     "--migrate-core-database",
     "--migrate-his-database",
-    @"--import-rsa-keys C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\privateKey.txt C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt",
+    $"--import-rsa-keys {privateKeyPath} {publicKeyPath}",
     "--set-nats-endpoint nats:nats@127.0.0.1:4222",
     "--generate-master-password"
 };
@@ -70,6 +73,17 @@ static void UpsertLyra3Options(string connectionString)
     {
         Console.WriteLine($"Failed to upsert Lyra3 options: {e.Message}.");
     }
+}
+
+static string FindDirectoryUp(string startDir, string markerFileName)
+{
+    var dir = new DirectoryInfo(startDir);
+    while (dir != null && !File.Exists(Path.Combine(dir.FullName, markerFileName)))
+    {
+        dir = dir.Parent;
+    }
+
+    return dir?.FullName ?? throw new InvalidOperationException($"'{markerFileName}' not found above '{startDir}'.");
 }
 
 static int RunDotNetRun(string projectPath, string arguments)
