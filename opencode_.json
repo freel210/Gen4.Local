@@ -1,0 +1,19 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+        "neuroapi": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "NeuroAPI (Qwen)",
+            "options": {
+                "baseURL": "https://neuroapi.host/v1"
+            },
+            "models": {
+                "qwen3.8-max": {
+                    "name": "Qwen 3.8 Max",
+                    "tool_call": true,
+                    "reasoning": true
+                }
+            }
+        }
+    }
+}

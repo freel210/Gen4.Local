@@ -8,6 +8,12 @@ public readonly record struct SeededData(Guid DiagnosisId, Guid PatientId);
 
 public static class DbSeeder
 {
+    public static async Task CleanupAsync(SmokeTestConfig config, Guid checklistTemplateId, Guid? checklistId, ConsoleLogger logger)
+    {
+        await CleanupCoreAsync(config.CoreDbConnection, checklistTemplateId, checklistId, logger);
+        await CleanupHisAsync(config.HisDbConnection, logger);
+    }
+
     public static async Task<SeededData> SeedAsync(SmokeTestConfig config, ConsoleLogger logger)
     {
         logger.Info("Seeding Lyra3 core database (admin + user)...");
@@ -60,6 +66,47 @@ public static class DbSeeder
         }
 
         await accounts.UpdateOneAsync(filter, update, new UpdateOptions { IsUpsert = true });
+    }
+
+    private static async Task CleanupCoreAsync(string connectionString, Guid checklistTemplateId, Guid? checklistId, ConsoleLogger logger)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var cleanup = new NpgsqlCommand("""
+            DELETE FROM checklists
+            WHERE id = @checklistId
+               OR template_id IN (SELECT id FROM checklist_templates WHERE name = @templateName);
+            DELETE FROM checklist_templates
+            WHERE id = @checklistTemplateId
+               OR name = @templateName;
+            """, connection);
+        cleanup.Parameters.AddWithValue("@checklistId", (object?)checklistId ?? DBNull.Value);
+        cleanup.Parameters.AddWithValue("@checklistTemplateId", checklistTemplateId);
+        cleanup.Parameters.AddWithValue("@templateName", TestData.ChecklistTemplateName);
+        await cleanup.ExecuteNonQueryAsync();
+        logger.Info("Core smoke-test data cleaned.");
+    }
+
+    private static async Task CleanupHisAsync(string connectionString, ConsoleLogger logger)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var cleanup = new NpgsqlCommand("""
+            DELETE FROM planned_surgeries WHERE note = @marker;
+            DELETE FROM employees WHERE comment = @marker;
+            DELETE FROM organization_parts WHERE name LIKE @markerPrefix;
+            DELETE FROM surgery_types WHERE code = @surgeryTypeCode;
+            DELETE FROM patients WHERE comment = @marker;
+            DELETE FROM diagnoses WHERE code = @diagnosisCode;
+            """, connection);
+        cleanup.Parameters.AddWithValue("@marker", TestData.ConstitutionMarker);
+        cleanup.Parameters.AddWithValue("@markerPrefix", "smoketest%");
+        cleanup.Parameters.AddWithValue("@surgeryTypeCode", TestData.SurgeryTypeCode);
+        cleanup.Parameters.AddWithValue("@diagnosisCode", TestData.DiagnosisCode);
+        await cleanup.ExecuteNonQueryAsync();
+        logger.Info("HIS smoke-test data cleaned.");
     }
 
     private static async Task<SeededData> SeedHisAsync(string connectionString)

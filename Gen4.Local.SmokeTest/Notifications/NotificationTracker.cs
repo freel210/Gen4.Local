@@ -2,11 +2,11 @@ namespace Gen4.Local.SmokeTest.Notifications;
 
 public sealed record ReceivedNotification(string Method, Guid Id, DateTime? Start, DateTime? End);
 
-public sealed class ExpectedNotification(string method, Guid id, DateTime? start, DateTime? end)
+public sealed class ExpectedNotification(string method, Guid? id, DateTime? start, DateTime? end)
 {
     public string Method { get; } = method;
 
-    public Guid Id { get; } = id;
+    public Guid? Id { get; } = id;
 
     public DateTime? Start { get; } = start;
 
@@ -54,7 +54,7 @@ public sealed class NotificationTracker
         }
     }
 
-    public void Expect(string method, Guid id, DateTime? start = null, DateTime? end = null)
+    public void Expect(string method, Guid? id = null, DateTime? start = null, DateTime? end = null)
     {
         lock (sync)
         {
@@ -103,7 +103,7 @@ public sealed class NotificationTracker
     private static bool IsSame(ExpectedNotification expectedNotification, ReceivedNotification receivedNotification)
     {
         return expectedNotification.Method == receivedNotification.Method
-            && expectedNotification.Id == receivedNotification.Id
+            && (expectedNotification.Id is null || expectedNotification.Id == receivedNotification.Id)
             && expectedNotification.Start == receivedNotification.Start
             && expectedNotification.End == receivedNotification.End;
     }

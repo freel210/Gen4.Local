@@ -68,4 +68,11 @@ public static class TestData
     public const string EmployeeComment = "smoketest";
     public const string EmployeeFirstName = "Smoke";
     public const string EmployeeLastName = "TestEmployee";
+
+    public const string ChecklistTemplateName = "smoketest-template";
+    public const string ChecklistTemplateDescription = "Smoke test checklist template";
+    public const string ChecklistStageName = "smoketest-stage";
+    public const string ChecklistBlockName = "smoketest-block";
+    public const string ChecklistBlockShortName = "smkt";
+    public const string ChecklistQuestionText = "Smoke test question";
 }

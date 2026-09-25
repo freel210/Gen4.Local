@@ -56,46 +56,65 @@ public static class SmokeTestRunner
 
         styx.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
 
-        logger.Info("Connecting to notifications hub...");
+        logger.Info("Connecting to notifications hubs...");
         var tracker = new NotificationTracker();
-        await using var hub = await RetryAsync(
-            () => ConnectHubAsync(config, userToken, tracker),
-            "Hub connection",
+        await using var hisHub = await RetryAsync(
+            () => ConnectHubAsync(config, "/his/hubs/notifications", userToken, connection => RegisterHandlers(connection, tracker)),
+            "His hub connection",
+            logger);
+        await using var coreHub = await RetryAsync(
+            () => ConnectHubAsync(config, "/core/hubs/notifications", userToken, connection => RegisterCoreHandlers(connection, tracker, logger)),
+            "Core hub connection",
             logger);
 
-        RunScenario(styx, tracker, seeded, logger);
+        var checklistTemplateId = Guid.NewGuid();
+        Guid? checklistId = null;
 
-        logger.Info("Waiting for notifications...");
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (!tracker.AllMatched && DateTime.UtcNow < deadline)
+        try
         {
-            await Task.Delay(250);
-        }
+            await RunScenarioAsync(styx, tracker, seeded, userToken, checklistTemplateId, logger);
 
-        logger.Info("Received {0} of {1} expected notifications.", tracker.ReceivedCount, tracker.ExpectedCount);
-        foreach (var notification in tracker.SnapshotReceived())
-        {
-            logger.Info("  {0}  {1}", notification.Method, notification.Id);
-        }
-
-        if (!tracker.AllMatched)
-        {
-            logger.Error("Missing notifications:");
-            foreach (var missing in tracker.SnapshotUnmatched())
+            logger.Info("Waiting for notifications...");
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!tracker.AllMatched && DateTime.UtcNow < deadline)
             {
-                logger.Error("  {0}  {1}  start={2}  end={3}", missing.Method, missing.Id, missing.Start, missing.End);
+                await Task.Delay(250);
             }
 
-            logger.Error("Received (full):");
+            checklistId = tracker.SnapshotReceived()
+                .Where(notification => notification.Method == "CheckListCreated")
+                .Select(notification => (Guid?)notification.Id)
+                .LastOrDefault();
+
+            logger.Info("Received {0} of {1} expected notifications.", tracker.ReceivedCount, tracker.ExpectedCount);
             foreach (var notification in tracker.SnapshotReceived())
             {
-                logger.Error("  {0}  {1}  start={2}  end={3}", notification.Method, notification.Id, notification.Start, notification.End);
+                logger.Info("  {0}  {1}", notification.Method, notification.Id);
             }
 
-            return 1;
-        }
+            if (!tracker.AllMatched)
+            {
+                logger.Error("Missing notifications:");
+                foreach (var missing in tracker.SnapshotUnmatched())
+                {
+                    logger.Error("  {0}  {1}  start={2}  end={3}", missing.Method, missing.Id, missing.Start, missing.End);
+                }
 
-        return 0;
+                logger.Error("Received (full):");
+                foreach (var notification in tracker.SnapshotReceived())
+                {
+                    logger.Error("  {0}  {1}  start={2}  end={3}", notification.Method, notification.Id, notification.Start, notification.End);
+                }
+
+                return 1;
+            }
+
+            return 0;
+        }
+        finally
+        {
+            await DbSeeder.CleanupAsync(config, checklistTemplateId, checklistId, logger);
+        }
     }
 
     private static async Task CheckLyra3CoreAsync(SmokeTestConfig config, string userToken, ConsoleLogger logger)
@@ -206,77 +225,86 @@ public static class SmokeTestRunner
         return false;
     }
 
-    private static void RunScenario(HttpClient his, NotificationTracker tracker, SeededData seeded, ConsoleLogger logger)
+    private static async Task RunScenarioAsync(HttpClient styx, NotificationTracker tracker, SeededData seeded, string userToken, Guid checklistTemplateId, ConsoleLogger logger)
     {
         logger.Info("Scenario: SurgeryType create/update/delete...");
-        var surgeryTypeId = HisApiClient.CreateSurgeryTypeAsync(his, TestData.SurgeryTypeCode, TestData.SurgeryTypeName).GetAwaiter().GetResult();
+        var surgeryTypeId = await HisApiClient.CreateSurgeryTypeAsync(styx, TestData.SurgeryTypeCode, TestData.SurgeryTypeName);
         tracker.Expect("SurgeryTypeCreated", surgeryTypeId);
         logger.Info("  created {0}", surgeryTypeId);
 
-        HisApiClient.UpdateSurgeryTypeAsync(his, surgeryTypeId, TestData.SurgeryTypeCode, TestData.SurgeryTypeName).GetAwaiter().GetResult();
+        await HisApiClient.UpdateSurgeryTypeAsync(styx, surgeryTypeId, TestData.SurgeryTypeCode, TestData.SurgeryTypeName);
         tracker.Expect("SurgeryTypeUpdated", surgeryTypeId);
         logger.Info("  updated {0}", surgeryTypeId);
 
         logger.Info("Scenario: Employee create/update/delete...");
-        var employeeId = HisApiClient.CreateEmployeeAsync(his).GetAwaiter().GetResult();
+        var employeeId = await HisApiClient.CreateEmployeeAsync(styx);
         tracker.Expect("EmployeeCreated", employeeId);
         logger.Info("  created {0}", employeeId);
 
-        HisApiClient.UpdateEmployeeAsync(his, employeeId).GetAwaiter().GetResult();
+        await HisApiClient.UpdateEmployeeAsync(styx, employeeId);
         tracker.Expect("EmployeeUpdated", employeeId);
         logger.Info("  updated {0}", employeeId);
 
         logger.Info("Scenario: OrganizationPart create (root + department) /update/delete...");
-        var rootId = HisApiClient.AddOrganizationRootAsync(his, TestData.RootName).GetAwaiter().GetResult();
+        var rootId = await HisApiClient.AddOrganizationRootAsync(styx, TestData.RootName);
         tracker.Expect("OrganizationPartCreated", rootId);
         logger.Info("  root created {0}", rootId);
 
-        var partId = HisApiClient.AddOrganizationPartAsync(his, TestData.PartName, "OperatingRoom", rootId).GetAwaiter().GetResult();
+        var partId = await HisApiClient.AddOrganizationPartAsync(styx, TestData.PartName, "OperatingRoom", rootId);
         tracker.Expect("OrganizationPartCreated", partId);
         logger.Info("  part created {0}", partId);
 
-        HisApiClient.UpdateOrganizationPartAsync(his, partId, TestData.PartNameUpdated, "OperatingRoom", rootId).GetAwaiter().GetResult();
+        await HisApiClient.UpdateOrganizationPartAsync(styx, partId, TestData.PartNameUpdated, "OperatingRoom", rootId);
         tracker.Expect("OrganizationPartUpdated", partId);
         logger.Info("  part updated {0}", partId);
 
         logger.Info("Scenario: PlannedSurgery create/update/delete...");
         var start = new DateTime(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
         var end = start.AddHours(1);
-        var surgeryId = HisApiClient.AddPlannedSurgeryAsync(his, start, end, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, partId).GetAwaiter().GetResult();
+        var surgeryId = await HisApiClient.AddPlannedSurgeryAsync(styx, start, end, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, partId);
         tracker.Expect("PlannedSurgeryCreated", surgeryId, start, end);
         logger.Info("  created {0}", surgeryId);
 
         var start2 = start.AddDays(1);
         var end2 = end.AddDays(1);
-        HisApiClient.UpdatePlannedSurgeryAsync(his, surgeryId, start2, end2, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, partId).GetAwaiter().GetResult();
+        await HisApiClient.UpdatePlannedSurgeryAsync(styx, surgeryId, start2, end2, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, partId);
         tracker.Expect("PlannedSurgeryUpdated", surgeryId, start2, end2);
         logger.Info("  updated {0}", surgeryId);
 
-        HisApiClient.DeletePlannedSurgeryAsync(his, surgeryId).GetAwaiter().GetResult();
+        await HisApiClient.DeletePlannedSurgeryAsync(styx, surgeryId);
         tracker.Expect("PlannedSurgeryDeleted", surgeryId, start2, end2);
         logger.Info("  deleted {0}", surgeryId);
 
+        logger.Info("Scenario: ChecklistTemplate + Checklist create (core)...");
+        await ChecklistApiClient.CreateChecklistTemplateAsync(styx, checklistTemplateId);
+        logger.Info("  template created {0}", checklistTemplateId);
+
+        tracker.Expect("CheckListCreated");
+        await ChecklistApiClient.CreateChecklistAsync(styx, userToken, surgeryTypeId, checklistTemplateId);
+        logger.Info("  checklist posted; id will arrive with the CheckListCreated event");
+
         logger.Info("Scenario: deletes...");
-        HisApiClient.DeleteOrganizationPartAsync(his, partId).GetAwaiter().GetResult();
+        await HisApiClient.DeleteOrganizationPartAsync(styx, partId);
         tracker.Expect("OrganizationPartDeleted", partId);
         logger.Info("  part deleted {0}", partId);
 
-        HisApiClient.DeleteEmployeeAsync(his, employeeId).GetAwaiter().GetResult();
+        await HisApiClient.DeleteEmployeeAsync(styx, employeeId);
         tracker.Expect("EmployeeDeleted", employeeId);
         logger.Info("  employee deleted {0}", employeeId);
 
-        HisApiClient.DeleteSurgeryTypeAsync(his, surgeryTypeId).GetAwaiter().GetResult();
+        await HisApiClient.DeleteSurgeryTypeAsync(styx, surgeryTypeId);
         tracker.Expect("SurgeryTypeDeleted", surgeryTypeId);
         logger.Info("  surgery type deleted {0}", surgeryTypeId);
     }
 
     private static async Task<HubConnection> ConnectHubAsync(
         SmokeTestConfig config,
+        string path,
         string userToken,
-        NotificationTracker tracker)
+        Action<HubConnection> registerHandlers)
     {
         var connection = new HubConnectionBuilder()
-            .WithUrl(new Uri(new Uri(config.StyxUrl), "/his/hubs/notifications"), options =>
+            .WithUrl(new Uri(new Uri(config.StyxUrl), path), options =>
             {
                 options.Transports = HttpTransportType.WebSockets;
                 options.SkipNegotiation = true;
@@ -285,7 +313,7 @@ public static class SmokeTestRunner
             })
             .Build();
 
-        RegisterHandlers(connection, tracker);
+        registerHandlers(connection);
 
         try
         {
@@ -317,6 +345,15 @@ public static class SmokeTestRunner
         connection.On<Guid, DateTime, DateTime>("PlannedSurgeryCreated", (id, start, end) => tracker.Record("PlannedSurgeryCreated", id, start, end));
         connection.On<Guid, DateTime, DateTime>("PlannedSurgeryUpdated", (id, start, end) => tracker.Record("PlannedSurgeryUpdated", id, start, end));
         connection.On<Guid, DateTime, DateTime>("PlannedSurgeryDeleted", (id, start, end) => tracker.Record("PlannedSurgeryDeleted", id, start, end));
+    }
+
+    private static void RegisterCoreHandlers(HubConnection connection, NotificationTracker tracker, ConsoleLogger logger)
+    {
+        connection.On<Guid>("CheckListCreated", id =>
+        {
+            logger.Info(">>> CheckListCreated event received from core hub: checklist id={0}", id);
+            tracker.Record("CheckListCreated", id);
+        });
     }
 
     private static async Task<T> RetryAsync<T>(Func<Task<T>> action, string what, ConsoleLogger logger, TimeSpan? timeout = null)
