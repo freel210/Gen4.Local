@@ -7,6 +7,7 @@ public sealed record JwtClaims(
     string? Audience,
     string? Subject,
     string? JwtId,
+    string? UniqueName,
     long? ExpiresAtUnix,
     IReadOnlyList<string> Roles);
 
@@ -17,6 +18,12 @@ public static class JwtInspector
         "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
         "role",
         "roles",
+    ];
+
+    private static readonly string[] UniqueNameClaimKeys =
+    [
+        "unique_name",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
     ];
 
     public static JwtClaims Parse(string accessToken)
@@ -35,6 +42,7 @@ public static class JwtInspector
             ReadString(root, "aud"),
             ReadString(root, "sub"),
             ReadString(root, "jti"),
+            ReadFirstString(root, UniqueNameClaimKeys),
             root.TryGetProperty("exp", out var exp) && exp.ValueKind == JsonValueKind.Number
                 ? exp.GetInt64()
                 : null,
@@ -46,6 +54,19 @@ public static class JwtInspector
         if (root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
         {
             return value.GetString();
+        }
+
+        return null;
+    }
+
+    private static string? ReadFirstString(JsonElement root, IEnumerable<string> names)
+    {
+        foreach (var name in names)
+        {
+            if (ReadString(root, name) is { Length: > 0 } value)
+            {
+                return value;
+            }
         }
 
         return null;

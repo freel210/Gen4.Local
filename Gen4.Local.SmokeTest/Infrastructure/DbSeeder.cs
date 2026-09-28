@@ -6,8 +6,63 @@ namespace Gen4.Local.SmokeTest.Infrastructure;
 
 public readonly record struct SeededData(Guid DiagnosisId, Guid PatientId);
 
+public readonly record struct Lyra3PwaTokenRow(string RefreshToken, string Login, string Audience, string? PasswordHash);
+
 public static class DbSeeder
 {
+    public static async Task<Lyra3PwaTokenRow?> GetLyra3PwaTokenRowAsync(string connectionString, Guid userId)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT refresh_token, login, audience, password_hash
+            FROM lyra3_users_long_life_tokens
+            WHERE user_id = @userId;
+            """,
+            connection);
+        command.Parameters.AddWithValue("userId", userId);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return null;
+        }
+
+        return new Lyra3PwaTokenRow(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3));
+    }
+
+    public static async Task<int> CountLyra3PwaTokenRowsAsync(string connectionString, Guid userId)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM lyra3_users_long_life_tokens WHERE user_id = @userId;",
+            connection);
+        command.Parameters.AddWithValue("userId", userId);
+
+        return (int)(long)(await command.ExecuteScalarAsync() ?? 0L);
+    }
+
+    public static async Task<int> DeleteLyra3PwaTokenRowsAsync(string connectionString, Guid userId)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            "DELETE FROM lyra3_users_long_life_tokens WHERE user_id = @userId;",
+            connection);
+        command.Parameters.AddWithValue("userId", userId);
+
+        return await command.ExecuteNonQueryAsync();
+    }
+
     public static async Task CleanupAsync(SmokeTestConfig config, Guid checklistTemplateId, Guid? checklistId, ConsoleLogger logger)
     {
         await CleanupCoreAsync(config.CoreDbConnection, checklistTemplateId, checklistId, logger);

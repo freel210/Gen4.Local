@@ -1,3 +1,7 @@
+using Gen4.Local;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var pgUser = builder.AddParameter("pg-user", "postgres");
@@ -60,10 +64,31 @@ var tempPath = @"C:\Users\user2\Documents\Projects\Gen4.Local\Temp";
 
 Directory.CreateDirectory(tempPath);
 
+const int hisPort = 5200;
+const int corePort = 5100;
+const int styxPort = 5050;
+
+// Without a health check Aspire considers a resource ready the moment its process is spawned and
+// releases WaitFor dependents immediately. his-api then reads its configuration over HTTP from
+// core-api and gives up after ~6s, so on a cold start it died before core-api ever bound its
+// listener. These gates hold dependents until Kestrel is actually accepting connections.
+var coreListening = new TcpEndpointHealthCheck(corePort);
+var hisListening = new TcpEndpointHealthCheck(hisPort);
+var styxListening = new TcpEndpointHealthCheck(styxPort);
+
+builder.Services
+    .AddHealthChecks()
+    .AddAsyncCheck("core-listening", ct => coreListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5))
+    .AddAsyncCheck("his-listening", ct => hisListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5))
+    .AddAsyncCheck("styx-listening", ct => styxListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5));
+
 var initJob = builder.AddProject<Projects.Gen4_Local_Init>("init-job");
-var hisApi = builder.AddProject<Projects.Gen4_HP_HIS_API>("his-api");
-var coreApi = builder.AddProject<Projects.Gen4_HP_Core_API>("core-api");
-var styxApi = builder.AddProject<Projects.Gen4_HP_Styx_API>("styx-api");
+var hisApi = builder.AddProject<Projects.Gen4_HP_HIS_API>("his-api")
+    .WithHealthCheck("his-listening");
+var coreApi = builder.AddProject<Projects.Gen4_HP_Core_API>("core-api")
+    .WithHealthCheck("core-listening");
+var styxApi = builder.AddProject<Projects.Gen4_HP_Styx_API>("styx-api")
+    .WithHealthCheck("styx-listening");
 
 initJob
     .WithEnvironment("GEN4HP_CONFIGROOT", configPath)
@@ -75,7 +100,7 @@ hisApi
     .WithEnvironment("CONFIG_ROOT", configPath)
     .WithEnvironment("CERTS_ROOT", certsPath)
     .WithEnvironment("HIS_CORE_ENDPOINT", coreApi.GetEndpoint("https").HostPort())
-    .WithEndpoint(port: 5200, scheme: "https", isProxied: false)
+    .WithEndpoint(port: hisPort, scheme: "https", isProxied: false)
     .WaitFor(coreApi)
     .WaitForCompletion(initJob);
 
@@ -85,16 +110,18 @@ coreApi
     .WithEnvironment("CORE_TEMP_DIR", tempPath)
     .WithEnvironment("HIS_ENDPOINT", hisApi.GetEndpoint("https").HostPort())
     .WithEnvironment("STYX_ENDPOINT", styxApi.GetEndpoint("grpc").HostPort())
-    .WithEndpoint(port: 5100, scheme: "https", isProxied: false)
+    .WithEndpoint(port: corePort, scheme: "https", isProxied: false)
     .WaitForCompletion(initJob);
 
 styxApi
     .WithEnvironment("CERTS_ROOT", certsPath)
-    .WithEnvironment("STYX_HTTPS_PORT", "5050")
+    .WithEnvironment("STYX_HTTPS_PORT", styxPort.ToString())
     .WithEnvironment("CORE_ENDPOINT", coreApi.GetEndpoint("https").HostPort())
     .WithEnvironment("HIS_ENDPOINT", hisApi.GetEndpoint("https").HostPort())
-    .WithEndpoint(port: 5050, scheme: "https", name: "https", isProxied: false)
+    .WithEndpoint(port: styxPort, scheme: "https", name: "https", isProxied: false)
     .WithEndpoint(port: 5001, scheme: "https", name: "grpc", isProxied: false)
+    .WaitFor(coreApi)
+    .WaitFor(hisApi)
     .WaitForCompletion(initJob);
 
 var styxHttps = styxApi.GetEndpoint("https");
