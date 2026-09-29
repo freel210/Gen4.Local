@@ -71,11 +71,39 @@ public static class DbSeeder
 
     public static async Task<SeededData> SeedAsync(SmokeTestConfig config, ConsoleLogger logger)
     {
-        logger.Info("Seeding Lyra3 core database (admin + user)...");
+        logger.Info("Seeding core database (Gen4 administrator)...");
+        await SeedCoreAdministratorAsync(config.CoreDbConnection);
+
+        logger.Info("Seeding Lyra3 core database (user)...");
         await SeedLyra3CoreAsync(config.Lyra3MongoConnection);
 
         logger.Info("Seeding his database (diagnosis + patient, cleaning leftovers)...");
         return await SeedHisAsync(config.HisDbConnection);
+    }
+
+    private static async Task SeedCoreAdministratorAsync(string connectionString)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using (var cleanup = new NpgsqlCommand("DELETE FROM administrators WHERE login = @login;", connection))
+        {
+            cleanup.Parameters.AddWithValue("login", TestData.AdminLogin);
+            await cleanup.ExecuteNonQueryAsync();
+        }
+
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO administrators (login, password_hash, is_enabled, full_name)
+            VALUES (@login, @passwordHash, TRUE, @fullName);
+            """,
+            connection);
+        command.Parameters.AddWithValue("login", TestData.AdminLogin);
+        command.Parameters.AddWithValue(
+            "passwordHash",
+            BCrypt.Net.BCrypt.HashPassword(TestData.Password, TestData.AdminPasswordHashWorkFactor));
+        command.Parameters.AddWithValue("fullName", TestData.AdminLogin);
+        await command.ExecuteNonQueryAsync();
     }
 
     private static async Task SeedLyra3CoreAsync(string connectionString)
@@ -85,14 +113,6 @@ public static class DbSeeder
         var accounts = db.GetCollection<BsonDocument>("accounts");
 
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(TestData.Password);
-
-        await UpsertAccountAsync(accounts, new BsonDocument
-        {
-            { "type", "Administrator" },
-            { "login", TestData.AdminLogin },
-            { "passwordHash", passwordHash },
-            { "isEnabled", true },
-        });
 
         await UpsertAccountAsync(accounts, new BsonDocument
         {

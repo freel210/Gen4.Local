@@ -126,12 +126,13 @@ public static class SmokeTestRunner
         const int expectedMaxAge = 400 * 24 * 60 * 60;
 
         var userClaims = JwtInspector.Parse(userToken);
-        var leaked = userClaims.Roles
-            .Where(role => !string.Equals(role, "User", StringComparison.Ordinal))
+        var beyondPwa = userClaims.Roles
+            .Where(role => !TestData.ExpectedPwaRoles.Contains(role, StringComparer.Ordinal))
+            .Distinct()
             .ToList();
-        if (leaked.Count == 0)
+        if (beyondPwa.Count == 0)
         {
-            throw new InvalidOperationException("The /user token is expected to carry Lyra3 and ClientRole values, but it carries only 'User'; the PWA assertion would be vacuous.");
+            throw new InvalidOperationException("The /user token is expected to carry roles beyond the PWA set; the PWA assertion would be vacuous.");
         }
 
         // The /user and /pwa tokens are issued for the same Lyra3 account, so the /user token's sub
@@ -168,7 +169,13 @@ public static class SmokeTestRunner
             throw new InvalidOperationException("PWA login: stored password_hash is empty.");
         }
 
-        logger.Info("  lyra3_users_long_life_tokens row: login={0}, audience={1}, password_hash={2} chars", row.Login, row.Audience, row.PasswordHash!.Length);
+        var storedCost = ReadBcryptCost(row.PasswordHash);
+        if (storedCost != TestData.ExpectedPasswordHashWorkFactor)
+        {
+            throw new InvalidOperationException($"PWA login: stored password_hash uses BCrypt cost {storedCost}, expected {TestData.ExpectedPasswordHashWorkFactor}.");
+        }
+
+        logger.Info("  lyra3_users_long_life_tokens row: login={0}, audience={1}, password_hash={2} chars, bcrypt cost={3}", row.Login, row.Audience, row.PasswordHash!.Length, storedCost);
 
         logger.Info("PWA refresh: POST /core/api/tokens/pwa/refresh");
         var rotatedBundle = await CoreApiClient.RefreshAsync(styx, "pwa", pwaBundle.RefreshToken);
@@ -240,15 +247,22 @@ public static class SmokeTestRunner
         }
     }
 
+    private static int ReadBcryptCost(string passwordHash)
+    {
+        // Modular crypt format: $<id>$<version>$<cost>$<salt><hash>
+        var parts = passwordHash.Split('$');
+        if (parts.Length < 4 || !int.TryParse(parts[2], out var cost))
+        {
+            throw new InvalidOperationException($"'{passwordHash}' is not a BCrypt hash with an explicit cost.");
+        }
+
+        return cost;
+    }
+
     private static JwtClaims CheckPWAToken(string accessToken, string what, ConsoleLogger logger)
     {
         var claims = JwtInspector.Parse(accessToken);
-        ValidateCommon(claims, what);
-
-        if (!string.Equals(claims.Audience, "lyra3", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException($"{what}: aud is '{claims.Audience}', expected 'lyra3'.");
-        }
+        ValidateCommon(claims, what, "lyra3");
 
         if (!Guid.TryParse(claims.Subject, out _))
         {
@@ -258,12 +272,25 @@ public static class SmokeTestRunner
         Expect(claims.UniqueName, TestData.UserLogin, $"{what}: unique_name");
 
         var roles = claims.Roles.Distinct().OrderBy(role => role, StringComparer.Ordinal).ToList();
-        if (roles.Count != 1 || !string.Equals(roles[0], "User", StringComparison.Ordinal))
+        var expectedRoles = TestData.ExpectedPwaRoles.OrderBy(role => role, StringComparer.Ordinal).ToList();
+        if (!roles.SequenceEqual(expectedRoles, StringComparer.Ordinal))
         {
-            throw new InvalidOperationException($"{what}: expected exactly one role 'User', got [{string.Join(", ", roles)}].");
+            throw new InvalidOperationException(
+                $"{what}: expected exactly [{string.Join(", ", expectedRoles)}], got [{string.Join(", ", roles)}].");
         }
 
-        logger.Info("{0}: aud=lyra3, sub={1}, unique_name={2}, roles=[User]", what, claims.Subject, claims.UniqueName);
+        var writeRoles = TestData.ExpectedUserRoles
+            .Where(role => !TestData.ExpectedPwaRoles.Contains(role, StringComparer.Ordinal))
+            .Where(role => roles.Contains(role, StringComparer.Ordinal))
+            .ToList();
+        if (writeRoles.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"{what}: a PWA token must not carry Create/Edit/Delete ClientRole values, found [{string.Join(", ", writeRoles)}].");
+        }
+
+        logger.Info("{0}: aud=lyra3, sub={1}, unique_name={2}", what, claims.Subject, claims.UniqueName);
+        logger.Info("  roles: {0}", string.Join(", ", roles));
         logger.Info("  access token: {0}", accessToken);
         return claims;
     }
@@ -295,7 +322,7 @@ public static class SmokeTestRunner
     private static void CheckUserToken(string accessToken, string what, ConsoleLogger logger)
     {
         var claims = JwtInspector.Parse(accessToken);
-        ValidateCommon(claims, what);
+        ValidateCommon(claims, what, "lyra3");
 
         var missing = TestData.ExpectedUserRoles
             .Where(role => !claims.Roles.Contains(role, StringComparer.Ordinal))
@@ -313,24 +340,24 @@ public static class SmokeTestRunner
     private static void CheckAdminToken(string accessToken, string what, ConsoleLogger logger)
     {
         var claims = JwtInspector.Parse(accessToken);
-        ValidateCommon(claims, what);
+        ValidateCommon(claims, what, "gen4audience");
 
-        var leaked = claims.Roles
-            .Where(role => TestData.ExpectedUserRoles.Contains(role, StringComparer.Ordinal))
-            .ToList();
-        if (leaked.Count > 0)
+        var roles = claims.Roles.Distinct().OrderBy(role => role, StringComparer.Ordinal).ToList();
+        var expectedRoles = TestData.ExpectedAdminRoles.OrderBy(role => role, StringComparer.Ordinal).ToList();
+        if (!roles.SequenceEqual(expectedRoles, StringComparer.Ordinal))
         {
-            throw new InvalidOperationException($"{what}: admin token must not carry ClientRole values, found: {string.Join(", ", leaked)}.");
+            throw new InvalidOperationException(
+                $"{what}: expected exactly [{string.Join(", ", expectedRoles)}], got [{string.Join(", ", roles)}].");
         }
 
-        logger.Info("{0}: aud=lyra3, sub={1}, no ClientRole values.", what, claims.Subject);
+        logger.Info("{0}: aud=gen4audience (issued by Gen4, not Lyra3), sub={1}, roles=[{2}]", what, claims.Subject, string.Join(", ", roles));
     }
 
-    private static void ValidateCommon(JwtClaims claims, string what)
+    private static void ValidateCommon(JwtClaims claims, string what, string expectedAudience)
     {
-        if (!string.Equals(claims.Audience, "lyra3", StringComparison.Ordinal))
+        if (!string.Equals(claims.Audience, expectedAudience, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"{what}: aud is '{claims.Audience}', expected 'lyra3'.");
+            throw new InvalidOperationException($"{what}: aud is '{claims.Audience}', expected '{expectedAudience}'.");
         }
 
         if (string.IsNullOrEmpty(claims.Subject))

@@ -26,6 +26,12 @@ public static class TestData
     public const string UserLogin = "smoketest.user";
     public const string Password = "smoketest";
 
+    /// <summary>Matches Gen4.HP.Admins.AdminsDefines.AdminPasswordHashWorkFactor.</summary>
+    public const int AdminPasswordHashWorkFactor = 12;
+
+    /// <summary>The only role a Gen4-issued admin token may carry.</summary>
+    public static readonly string[] ExpectedAdminRoles = ["Administrator"];
+
     public static readonly string[] ExpectedUserRoles =
     [
         "EmployeesView",
@@ -53,6 +59,20 @@ public static class TestData
     ];
 
     public const string ConstitutionMarker = "smoketest";
+    public const int ExpectedPasswordHashWorkFactor = 12;
+
+    /// <summary>
+    /// Mirrors Gen4.HP.Auth.ILyra3TokenProcessor.PwaRoles - the User role plus the read-only
+    /// ClientRole values a PWA access token may carry.
+    /// </summary>
+    public static readonly string[] ExpectedPwaRoles =
+    [
+        "User",
+        "EmployeesView",
+        "PatientsView",
+        "DirectoriesView",
+        "PlannedSurgeriesView",
+    ];
     public const string DiagnosisCode = "SMKT";
     public const string DiagnosisName = "Smoke test diagnosis";
     public const string PatientFirstName = "Smoke";
