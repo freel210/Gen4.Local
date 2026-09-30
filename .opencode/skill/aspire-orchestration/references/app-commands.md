@@ -24,6 +24,43 @@ aspire stop
 | `aspire start` | Background (detached) | **AI agents — always prefer** |
 | `aspire run --detach` | Background | Alternative to `aspire start` |
 
+### `aspire start` Blocks On The Build — Pre-Build To Keep It Fast
+
+`aspire start` does not return the moment it spawns the AppHost. It waits for the AppHost to come up, and
+the AppHost builds its projects first. On a cold build that is minutes of wall clock, and it is charged
+entirely to `ASPIRE_CLI_START_TIMEOUT`, which **defaults to 120 seconds** — not 600.
+
+```bash
+# ✅ Preferred: build first, so the AppHost's own build is a no-op
+dotnet build <solution.sln>
+$env:ASPIRE_CLI_START_TIMEOUT="600"   # headroom for the first start / cold restore
+aspire start --format json
+```
+
+| Symptom | Meaning |
+|---------|---------|
+| `aspire start` returns in seconds on a warm build | Normal. |
+| `aspire start` takes minutes on a cold build | Normal, not a hang. Pre-build to avoid it. |
+| `Timed out waiting 120s for AppHost to start` | The default timeout was exceeded and the CLI killed the AppHost. Raise `ASPIRE_CLI_START_TIMEOUT` or pre-build. |
+| A later `aspire wait` says `No running AppHost found` | A consequence of the above, not a separate problem. |
+
+The AppHost writes its own log to a `detach-child_*.log` file under `~/.aspire/logs/`. `aspire start
+--format json` returns that path in `logFile` — use it to read the AppHost's own view when a start fails.
+
+### Container Cleanup After `aspire stop`
+
+On Aspire 13.5.x / DCP builds observed on Windows, Aspire-managed containers carry the label
+`com.microsoft.developer.usvc-dev.name`, **not** `aspire.io`. A cleanup that filters on `label=aspire.io`
+silently matches nothing and leaks containers across runs.
+
+```bash
+# ✅ Removes Aspire-managed containers on this build
+docker ps -q --filter "label=com.microsoft.developer.usvc-dev.name" | ForEach-Object { docker rm -f $_ }
+```
+
+Verify the label scheme on the current version before relying on it, and prefer `aspire stop` as the
+primary teardown — manual `docker rm` is only for containers `aspire stop` left behind.
+
 ## Create A New Aspire App Or Add Aspire To An Existing App
 
 ```bash

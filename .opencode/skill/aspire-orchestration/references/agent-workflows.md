@@ -57,6 +57,46 @@ Keep these points in mind:
 - Do not restart the whole AppHost just because one resource changed or one resource needs to be rebuilt.
 - Aspire default watch is controlled by `features.defaultWatchEnabled`; use it for AppHost-centered CLI watch behavior, not as a replacement for resource-specific or IDE hot reload workflows.
 
+## Scenario: I Need One Result From The Running App, Then I Am Done
+
+The most common agent task on Aspire: start the stack, read one value, shut down. Do it in bounded steps
+instead of one long sleep.
+
+```bash
+# 1. Pre-build so the AppHost's build is a no-op
+dotnet build <solution.sln>
+dotnet build <smoketest-project>/<smoketest-project>.csproj
+
+# 2. Start with headroom for a cold start
+$env:ASPIRE_CLI_START_TIMEOUT="600"
+aspire start --format json
+
+# 3. Block on each resource you actually depend on
+aspire wait init-job   --status up      --timeout 120
+aspire wait core-api   --status healthy --timeout 300
+aspire wait smoke-test --status up      --timeout 300
+
+# 4. Read the result — immediate, filtered
+aspire logs smoke-test --search "response body"
+
+# 5. Stop now; the rest of the scenario is irrelevant
+aspire stop
+```
+
+Keep these points in mind:
+
+- **Never blind-sleep.** A fixed `Start-Sleep N` wastes time when startup is fast and still under-waits on
+  a cold build. `aspire wait` returns the instant the state is reached.
+- **Chain waits, don't multiply the timeout.** One `aspire wait` per dependency, each with its own
+  `--timeout`, so a slow resource doesn't force you to inflate the wait for a fast one.
+- **Read while the resource is alive.** One-shot resources can report `No logs found` after they exit.
+- **Tear down as soon as you have the answer.** `aspire stop` immediately — do not wait out a scenario
+  whose remainder you don't care about.
+- **Stop on the first error.** `aspire describe --format Json` exposes `state`, `exit_code`, and
+  `health_reports` (including the health-check exception message). Once you see a failure, stop and debug.
+- **Prefer one-shot MCP calls** (`list_console_logs` with `search`, `list_resources`, `describe`) over
+  spawning CLI subprocesses when the Aspire MCP server is connected.
+
 ## Scenario: Something Is Wrong, But Do Not Edit Code Yet
 
 Inspect the live app before editing code:

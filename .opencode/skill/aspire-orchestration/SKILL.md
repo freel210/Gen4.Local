@@ -74,6 +74,60 @@ See [safety-guardrails.md](references/safety-guardrails.md) for detailed rules a
 5. If AppHost code changed, rerun `aspire start`; if only one resource changed, prefer the resource's commands/watch/HMR/debug workflow
 6. `aspire stop` when cleanup is explicitly requested or needed to release locks/ports
 
+## Fast Agent Loop — Never Blind-Sleep
+
+**Never substitute a fixed `Start-Sleep N` (or a guessed large timeout) for a readiness wait.** A blanket
+sleep is wrong in both directions: it wastes minutes when the app comes up fast, and it still under-waits
+on a cold build. Wait for the specific state, read the specific result, then tear down.
+
+```bash
+# 1. Pre-build, so the AppHost's own build is a no-op
+dotnet build <solution.sln>
+
+# 2. Start; raise the start timeout in case the build is still cold
+$env:ASPIRE_CLI_START_TIMEOUT="600"
+aspire start --format json
+
+# 3. Block on the exact state you need — returns in seconds, not minutes
+aspire wait init-job   --status up      --timeout 120
+aspire wait core-api   --status healthy --timeout 300
+aspire wait smoke-test --status up      --timeout 300
+
+# 4. Read the one result, immediately, without waiting for anything else
+aspire logs smoke-test --search "response body"
+
+# 5. Stop as soon as the result is in hand — do not wait out the remaining scenario
+aspire stop
+```
+
+| Instead of | Do this |
+|------------|---------|
+| `Start-Sleep 250` then read logs | `aspire wait <resource> --status healthy --timeout 300`, then read |
+| Waiting for a whole scenario to finish | `aspire wait` on the specific resource, `aspire logs --search` for the specific line |
+| One long timeout covering everything | Chain `aspire wait` per resource, each with its own `--timeout` |
+| Waiting out a failure to gather more logs | `aspire describe` → check `state`/`exit_code`, then `aspire stop` and debug |
+
+| Command | Returns in | Use for agents |
+|---------|-----------|----------------|
+| `aspire wait <res> --status <s> --timeout <n>` | when the state is reached | ✅ Yes — this is the readiness primitive |
+| `aspire logs <res> --search "<pattern>"` | immediately (0s) | ✅ Yes — filtered result read |
+| `aspire describe [res] --format Json` | immediately | ✅ Yes — state, health reports, available commands |
+| `aspire logs <res> --follow --search "<p>"` | **never — streams until interrupted** | ❌ No — blocks the tool call until it times out |
+| `aspire_execute_resource_command` on a long-running resource | when the resource exits | ❌ No — same blocking problem |
+
+`--follow` is the right tool for a human watching a terminal, and the wrong tool for an agent: the call
+never returns, so it burns the whole tool timeout and then needs a separate kill. For agent use,
+`aspire logs --search` without `--follow` gives the same filtered content in one non-blocking round trip,
+and the result you need appears seconds after readiness.
+
+**Stop early.** Once the result is captured, `aspire stop` immediately — do not wait out a scenario whose
+remainder is irrelevant. The same applies to failures: as soon as `aspire describe` shows a failed state
+or a resource reports a non-zero exit code, tear down and start debugging instead of waiting for a timeout.
+
+**MCP equivalents.** When the Aspire MCP server is connected, prefer its one-shot calls over spawning CLI
+subprocesses: `list_console_logs` (accepts a full-text `search`), `list_resources`, `describe`,
+`execute_resource_command`, `list_traces`, `list_structured_logs`. All return immediately.
+
 ## Quick Reference
 
 | Task | Command |
@@ -82,6 +136,9 @@ See [safety-guardrails.md](references/safety-guardrails.md) for detailed rules a
 | Start app (human) | `aspire run` (foreground, dashboard) |
 | Stop app | `aspire stop` |
 | Wait for resource | `aspire wait <resource>` |
+| Wait with explicit bounds | `aspire wait <resource> --status healthy\|up\|down --timeout <seconds>` |
+| Read a filtered log line (agent-safe, returns immediately) | `aspire logs <resource> --search "<pattern>"` |
+| Stream logs (human-in-terminal only, blocks agents) | `aspire logs <resource> --follow --timestamps` |
 | Check status | `aspire ps` or `aspire describe` |
 | Show hidden resources (proxies, helpers, migrations) | `aspire ps --include-hidden` / `aspire describe --include-hidden` |
 | Resource operation | `aspire resource <resource-name> <command>` such as `stop`, `start`, or `rebuild` when exposed |
@@ -103,6 +160,10 @@ See [safety-guardrails.md](references/safety-guardrails.md) for detailed rules a
 
 | Symptom | Cause | Action |
 |---------|-------|--------|
+| **`Timed out waiting 120s for AppHost to start`** | `ASPIRE_CLI_START_TIMEOUT` defaults to **120s**, and a cold multi-project build exceeds it. The CLI then kills the AppHost and leaves nothing running, so a following `aspire wait` reports "No running AppHost found". | **Pre-build the projects before `aspire start`**, and set `$env:ASPIRE_CLI_START_TIMEOUT="600"` beforehand. Do not misread the follow-up "No running AppHost found" as a separate fault. |
+| **`aspire start` appears to hang for minutes** | It blocks until the AppHost is up, and the AppHost builds its projects first. | Expected on a cold build. Pre-build, or raise the start timeout. Not a hang. |
+| **`aspire logs --follow` never returns** | `--follow` streams until interrupted — by design. | For agents, drop `--follow` and use `aspire logs <res> --search "<pattern>"`, or use the MCP `list_console_logs` with `search`. |
+| `aspire logs --search` returns "No logs found" for a one-shot resource | The resource already exited and its console buffer is no longer retained. | Read the result while the resource is still running: `aspire wait` on it, then query logs before it exits — or read the resource's own output file. |
 | **File lock errors during build (`MSB3491`, `CS2012`)** | **Aspire is running and holds locks on `bin/`, `obj/`, and assemblies.** | **Run `aspire stop` first**, then rebuild or `aspire start`. Do NOT conclude the project has a permanent build failure. |
 | "Port already in use" | Previous instance running | `aspire stop`, then `aspire start` |
 | Resource not found | App not started or name wrong | `aspire ps` to check |
@@ -159,6 +220,7 @@ The same rule applies to any "file in use", "cannot access the file", or
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `ASPIRE_CLI_START_TIMEOUT` | `120` (seconds) | How long `aspire start` waits for the AppHost to come up. **Raise it before any start that will trigger a cold build** — a multi-project build can easily exceed 120s, and the start then dies with `Timed out waiting 120s for AppHost to start` and leaves no AppHost running. Set `$env:ASPIRE_CLI_START_TIMEOUT="600"` (PowerShell) before `aspire start`, or avoid the problem by pre-building (see [app-commands.md](references/app-commands.md)). |
 | `ASPIRE_ENABLE_CONTAINER_TUNNEL` | `true` | Container tunnel provides uniform host connectivity across Docker Desktop, Docker Engine, and Podman. Set to `false` to opt out. |
 | `ASPIRE_ENVIRONMENT` | unset | Selects the environment-specific config profile — controls which `appsettings.{environment}.json` is loaded and which environment is reported in dashboard telemetry. |
 | `ASPIRE_DCP_USE_DEVELOPER_CERTIFICATE` | `true` | The Aspire trusted developer certificate is used by DCP on Windows. Set to `false` to opt out. |
