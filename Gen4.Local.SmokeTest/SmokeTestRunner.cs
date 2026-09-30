@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Gen4.Local.SmokeTest.Infrastructure;
 using Gen4.Local.SmokeTest.Notifications;
 using Microsoft.AspNetCore.Http.Connections;
@@ -54,6 +55,8 @@ public static class SmokeTestRunner
         CheckAdminToken(adminBundle.AccessToken, "refreshed admin token", logger);
 
         await CheckLyra3CoreAsync(config, userBundle.AccessToken, logger);
+
+        await CheckLyra3AbsoluteUrlsAsync(styx, adminBundle.AccessToken, logger);
 
         var adminToken = adminBundle.AccessToken;
         var userToken = userBundle.AccessToken;
@@ -225,6 +228,77 @@ public static class SmokeTestRunner
         }
 
         logger.Info("PWA logout rejected a wrong password, accepted the right one, and removed the stored row.");
+    }
+
+    private static async Task CheckLyra3AbsoluteUrlsAsync(HttpClient styx, string adminAccessToken, ConsoleLogger logger)
+    {
+        logger.Info("Lyra3 absolute URLs: GET /core/api/config/lyra3");
+
+        TokenResult pwaBundle = null!;
+        await RetryAsync(
+            async () => pwaBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/pwa", TestData.UserLogin, TestData.Password),
+            "PWA login for absolute URLs",
+            logger);
+
+        string[] expectedProperties =
+        [
+            "jumboApiAbsoluteUrl",
+            "coreApiAbsoluteUrl",
+            "conferenceApiAbsoluteUrl",
+            "icuApiAbsoluteUrl",
+            "notificationApiAbsoluteUrl",
+            "storageAbsoluteUrl",
+            "externalAbsoluteUrl",
+        ];
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/core/api/config/lyra3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {pwaBundle.AccessToken}");
+
+        string body;
+        string? responseContentType;
+        using (var response = await styx.SendAsync(request))
+        {
+            body = await response.Content.ReadAsStringAsync();
+            responseContentType = response.Content.Headers.ContentType?.ToString();
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new InvalidOperationException(
+                    $"lyra3 absolute urls returned {(int)response.StatusCode} {response.ReasonPhrase}: {body}");
+            }
+        }
+
+        using var doc = JsonDocument.Parse(body);
+        foreach (var name in expectedProperties)
+        {
+            var value = doc.RootElement.TryGetProperty(name, out var element) ? element.GetString() : null;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException(
+                    $"lyra3 absolute urls: '{name}' is '{value}', expected a non-empty url.");
+            }
+        }
+
+        logger.Info(
+            "  pwa token accepted, all {0} urls present: {1}",
+            expectedProperties.Length,
+            string.Join(", ", expectedProperties.Select(name => $"{name}={doc.RootElement.GetProperty(name).GetString()}")));
+
+        logger.Info("  response body: {0}", body);
+        logger.Info("  response content-type: {0}", responseContentType);
+
+        using var adminRequest = new HttpRequestMessage(HttpMethod.Get, "/core/api/config/lyra3");
+        adminRequest.Headers.TryAddWithoutValidation("Authorization", $"Bearer {adminAccessToken}");
+
+        using var adminResponse = await styx.SendAsync(adminRequest);
+        if (adminResponse.StatusCode != HttpStatusCode.Forbidden)
+        {
+            throw new InvalidOperationException(
+                $"lyra3 absolute urls with an admin token returned {(int)adminResponse.StatusCode}, expected 403.");
+        }
+
+        logger.Info("  admin token rejected with 403");
+
+        await CoreApiClient.LogoutAsync(styx, "pwa", pwaBundle.RefreshToken, TestData.Password);
     }
 
     private static async Task<HttpStatusCode> TryPWALogoutAsync(HttpClient styx, string refreshToken, string? password)
