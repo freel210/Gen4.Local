@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.styx.srv\src\Gen4.HP.Styx.API\Gen4.HP.Styx.API.csproj" />
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Auth.API\Src\Src.csproj" />
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Core.API\Src\Src.csproj" />
+    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Jumbo.API\Src\Src.csproj" />
     <ProjectReference Include="..\Gen4.Local.Init\Gen4.Local.Init.csproj" />
     <ProjectReference Include="..\Gen4.Local.Lyra3Seed\Gen4.Local.Lyra3Seed.csproj" />
     <ProjectReference Include="..\Gen4.Local.SmokeTest\Gen4.Local.SmokeTest.csproj" />

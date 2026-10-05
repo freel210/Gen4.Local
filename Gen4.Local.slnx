@@ -15,6 +15,9 @@
   <Folder Name="/Lyra3/Core.API/">
     <Project Path="../../../../../Shared/Repos/Lyra3.HP.Core.API/Src/Src.csproj" Type="C#" />
   </Folder>
+  <Folder Name="/Lyra3/Jumbo.API/">
+    <Project Path="../../../../../Shared/Repos/Lyra3.HP.Jumbo.API/Src/Src.csproj" Type="C#" />
+  </Folder>
   <Folder Name="/Services/">
     <Project Path="../../../../../Shared/Repos/gen4.hp.core.srv/src/Gen4.HP.Core.API/Gen4.HP.Core.API.csproj" Type="C#" />
     <Project Path="../../../../../Shared/Repos/gen4.hp.his.srv/src/Gen4.HP.HIS.API/Gen4.HP.HIS.API.csproj" Type="C#" />

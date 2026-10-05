@@ -156,6 +156,22 @@ var lyra3Core = builder.AddExecutable("lyra3-core", "dotnet",
     .WaitFor(lyra3Auth)
     .WaitFor(s3Storage);
 
+// Kestrel endpoints for the Lyra3 services come from ListenOptions in their *.API.yml and are bound
+// with options.Listen(...), so ASPNETCORE_URLS and Aspire port injection have no effect: the ports
+// here are declarative only and must match the yaml. Jumbo additionally blocks in
+// ConfigureAppDependencies until {Auth,Core}AppUri + "api/health" answers, so it needs both waits.
+var lyra3Jumbo = builder.AddExecutable("lyra3-jumbo", "dotnet",
+        @"C:\Shared\Repos\Lyra3.HP.Jumbo.API\Src",
+        @"C:\Shared\Repos\Lyra3.HP.Jumbo.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Jumbo.API.dll")
+    .WithEnvironment("MVS_LYRA3_JUMBO_API_SRC", Path.Combine(lyra3ConfigPath, "Jumbo.API.yml"))
+    .WithEndpoint(port: 5042, targetPort: 5042, name: "dmz", isProxied: false)
+    .WithEndpoint(port: 3308, targetPort: 3308, name: "public", isProxied: false)
+    .WaitForCompletion(lyra3Seed)
+    .WaitFor(mongo)
+    .WaitFor(rabbitmq)
+    .WaitFor(lyra3Auth)
+    .WaitFor(lyra3Core);
+
 var smokeTest = builder.AddProject<Projects.Gen4_Local_SmokeTest>("smoke-test")
     .WithEnvironment("STYX_URL", ReferenceExpression.Create($"https://{styxHttps.Property(EndpointProperty.Host)}:{styxHttps.Property(EndpointProperty.Port)}"))
     .WithEnvironment("CERTS_ROOT", certsPath)

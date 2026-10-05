@@ -1,0 +1,40 @@
+LoggerOptions:
+  LogLevel: information
+  LogFormat: verbose
+  UseColors: true
+
+ListenOptions:
+  DmzEndpoints:
+    - 0.0.0.0:5042
+  PublicEndpoints:
+    - 0.0.0.0:3308
+
+PublicKeyRepositoryOptions:
+  PublicKeyPemFilePath: C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt
+
+MongoDbOptions:
+  "ConnectionString": 'mongodb://root:Passw0rd123@localhost:27018'
+  "DatabaseName": 'Lyra3CoreDb'
+
+HospitalPlatformOptions:
+  AuthAppUri: http://127.0.0.1:5052
+  CoreAppUri: http://127.0.0.1:5602
+  AppInstanceId: Lyra3.HP.Jumbo
+
+AuditOptions:
+  AuditId: Jumbo
+
+RabbitMQClientOptions:
+  RabbitMQServiceUri: amqp://lyra3:Passw0rd123@localhost:5673
+
+Jeconbol3Options:
+  IsEnabled: false
+  ServiceUrl: http://127.0.0.1:9097
+  Authorization: no-auth
+  MinutesUpdateInterval: 5
+
+CleaningOptions:
+  IntensiveDefaultDuration: 15
+  RegularDefaultDuration: 10
+  MinimalDuration: 15
+  MaximalDuration: 720
