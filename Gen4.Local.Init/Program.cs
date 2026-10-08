@@ -8,6 +8,12 @@ if (!string.IsNullOrEmpty(connectionString))
     UpsertLyra3Options(connectionString);
 }
 
+// The Master.CLI commands below belong to one-off system provisioning: schema migration, RSA key
+// import, NATS endpoint and master password. This project is an Aspire resource and therefore starts
+// on every environment launch, where re-running that sequence is unnecessary and destructive (the
+// master password is regenerated). The early return keeps provisioning manual - remove it to run the
+// sequence once against a fresh environment.
+#pragma warning disable CS0162
 return;
 
 var masterCliPath = @"C:\Shared\Repos\gen4.hp.master.cli\src\Gen4.HP.Master.CLI\Gen4.HP.Master.CLI.csproj";
@@ -36,6 +42,7 @@ foreach (var cmd in commands)
 
 Console.WriteLine("Done");
 Environment.Exit(0);
+#pragma warning restore CS0162
 
 static void UpsertLyra3Options(string connectionString)
 {

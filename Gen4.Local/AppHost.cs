@@ -50,8 +50,8 @@ var s3InitScripts = @"C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\LocalSt
 
 var s3Storage = builder.AddContainer("s3-storage", "gresau/localstack-persist", "4.14.0")
     .WithEnvironment("SERVICES", "s3")
-    .WithEnvironment("AWS_ACCESS_KEY_ID", s3AccessKey.Resource.Value)
-    .WithEnvironment("AWS_SECRET_ACCESS_KEY", s3SecretKey.Resource.Value)
+    .WithEnvironment("AWS_ACCESS_KEY_ID", s3AccessKey)
+    .WithEnvironment("AWS_SECRET_ACCESS_KEY", s3SecretKey)
     .WithEnvironment("AWS_REGION", "us-east-1")
     .WithEnvironment("PERSIST_S3", "1")
     .WithVolume("localstack-persist-data", "/persisted-data")
