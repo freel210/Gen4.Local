@@ -74,11 +74,39 @@ public static class SmokeTestRunner
             "Core hub connection",
             logger);
 
+        var checklistsChanged = 0;
+        await using var checklistsHub = await RetryAsync(
+            () => ConnectHubAsync(config, "/core/hubs/checklists", userToken, connection =>
+                connection.On("ChecklistsChanged", new Func<Task>(() =>
+                {
+                    Interlocked.Increment(ref checklistsChanged);
+                    return Task.CompletedTask;
+                }))),
+            "Checklists hub connection",
+            logger);
+
         var checklistTemplateId = Guid.NewGuid();
         Guid? checklistId = null;
 
         try
         {
+            await RetryAsync(
+                () =>
+                {
+                    if (Volatile.Read(ref checklistsChanged) < 1)
+                    {
+                        throw new InvalidOperationException("no readiness signal received");
+                    }
+
+                    return Task.CompletedTask;
+                },
+                "Checklists hub readiness signal",
+                logger,
+                TimeSpan.FromSeconds(30));
+
+            var readinessSignals = Volatile.Read(ref checklistsChanged);
+            logger.Info("  Checklists hub readiness signals: {0}", readinessSignals);
+
             await RunScenarioAsync(styx, tracker, seeded, userToken, checklistTemplateId, logger);
 
             logger.Info("Waiting for notifications...");
@@ -92,6 +120,28 @@ public static class SmokeTestRunner
                 .Where(notification => notification.Method == "CheckListCreated")
                 .Select(notification => (Guid?)notification.Id)
                 .LastOrDefault();
+
+            await RetryAsync(
+                async () =>
+                {
+                    if (Volatile.Read(ref checklistsChanged) <= readinessSignals)
+                    {
+                        throw new InvalidOperationException("no change signal received after checklist create");
+                    }
+
+                    var monitoring = await ChecklistApiClient.GetMonitoringChecklistsAsync(styx);
+
+                    if (checklistId is Guid created && !monitoring.Any(x => x.Id == created))
+                    {
+                        throw new InvalidOperationException($"checklist {created} is absent from {monitoring.Count} monitoring entries");
+                    }
+
+                    logger.Info("ChecklistsChanged signals after connect: {0}", Volatile.Read(ref checklistsChanged) - readinessSignals);
+                    logger.Info("GET /core/api/checklists/monitoring returned {0} entries: {1}", monitoring.Count, string.Join(", ", monitoring.Select(x => $"{x.Id} [{x.Status}]")));
+                },
+                "ChecklistsChanged signal and monitoring list",
+                logger,
+                TimeSpan.FromSeconds(30));
 
             logger.Info("Received {0} of {1} expected notifications.", tracker.ReceivedCount, tracker.ExpectedCount);
             foreach (var notification in tracker.SnapshotReceived())

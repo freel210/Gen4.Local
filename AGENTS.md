@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## Git
+
+**Never commit. The user reviews the diff and writes the commit themselves.**
+
+No `git commit`, no `git merge`, no `git rebase`, no `git push` — in any repo, including the product
+repos referenced from this one. Leave the change in the working tree and report what it is.
+
 ## Aspire lifecycle
 
 **Teardown is part of the task. Every run leaves no AppHost running.**
