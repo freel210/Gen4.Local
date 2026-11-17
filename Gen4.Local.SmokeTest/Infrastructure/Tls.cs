@@ -7,7 +7,7 @@ public static class Tls
 {
     public static HttpClientHandler CreateHandler(string certsRoot)
     {
-        var rootCa = new X509Certificate2(Path.Combine(certsRoot, "root-ca-cert.pem"));
+        var rootCa = X509CertificateLoader.LoadCertificateFromFile(Path.Combine(certsRoot, "root-ca-cert.pem"));
 
         return new HttpClientHandler
         {

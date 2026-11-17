@@ -63,6 +63,40 @@ public static class DbSeeder
         return await command.ExecuteNonQueryAsync();
     }
 
+    public static async Task SetLyra3AccountEnabledAsync(string connectionString, string login, bool isEnabled)
+    {
+        var client = new MongoClient(connectionString);
+        var db = client.GetDatabase("Lyra3CoreDb");
+        var accounts = db.GetCollection<BsonDocument>("accounts");
+
+        var filter = Builders<BsonDocument>.Filter.Eq("login", login);
+        var update = Builders<BsonDocument>.Update.Set("isEnabled", isEnabled);
+
+        var result = await accounts.UpdateOneAsync(filter, update);
+        if (result.MatchedCount == 0)
+        {
+            throw new InvalidOperationException($"Lyra3 account '{login}' is missing from the accounts collection.");
+        }
+    }
+
+    public static async Task SetLyra3AccountRoleAsync(string connectionString, string login, string role, bool isAssigned)
+    {
+        var client = new MongoClient(connectionString);
+        var db = client.GetDatabase("Lyra3CoreDb");
+        var accounts = db.GetCollection<BsonDocument>("accounts");
+
+        var filter = Builders<BsonDocument>.Filter.Eq("login", login);
+        var update = isAssigned
+            ? Builders<BsonDocument>.Update.AddToSet("roles", BsonValue.Create(role))
+            : Builders<BsonDocument>.Update.Pull("roles", BsonValue.Create(role));
+
+        var result = await accounts.UpdateOneAsync(filter, update);
+        if (result.MatchedCount == 0)
+        {
+            throw new InvalidOperationException($"Lyra3 account '{login}' is missing from the accounts collection.");
+        }
+    }
+
     public static async Task CleanupAsync(SmokeTestConfig config, Guid checklistTemplateId, Guid? checklistId, ConsoleLogger logger)
     {
         await CleanupCoreAsync(config.CoreDbConnection, checklistTemplateId, checklistId, logger);

@@ -49,6 +49,13 @@ aspire stop
 
 ## Repo conventions worth knowing
 
+- **The local stand master password lives in `Temp/master-password.txt`** (git-ignored). It is
+  created by `Gen4.Local.Init` when `/Configuration/Master/PasswordHash` is absent; restart
+  `core-api` afterwards, because `CoreConfigurationProvider` reads the database configuration once
+  at startup.
+- **`scripts/verify-config-access.ps1` exercises the `/api/config` authorization** matrix: master
+  token through styx, the same token directly against core with a client certificate, and the
+  no-certificate and no-token controls.
 - **Lyra3 services launch via `AddExecutable`, not `AddProject`.** Every Lyra3 repo names its project
   file `Src.csproj`, and Aspire derives the `Projects.*` metadata type from the file name, so
   `Projects.Src` resolves to exactly one of them (currently Core). A fourth Lyra3 service cannot be

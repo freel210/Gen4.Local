@@ -32,6 +32,10 @@ public static class TestData
     /// <summary>The only role a Gen4-issued admin token may carry.</summary>
     public static readonly string[] ExpectedAdminRoles = ["Administrator"];
 
+    public const string Gen4UserRole = "Gen4User";
+
+    public const string Lyra3UserRole = "User";
+
     public static readonly string[] ExpectedUserRoles =
     [
         "EmployeesView",
@@ -62,12 +66,12 @@ public static class TestData
     public const int ExpectedPasswordHashWorkFactor = 12;
 
     /// <summary>
-    /// Mirrors Gen4.HP.Auth.ILyra3TokenProcessor.PwaRoles - the User role plus the read-only
+    /// Mirrors Gen4.HP.Auth.ILyra3TokenProcessor.PwaRoles - the Gen4User role plus the read-only
     /// ClientRole values a PWA access token may carry.
     /// </summary>
     public static readonly string[] ExpectedPwaRoles =
     [
-        "User",
+        Gen4UserRole,
         "EmployeesView",
         "PatientsView",
         "DirectoriesView",
@@ -78,12 +82,14 @@ public static class TestData
     public const string PatientFirstName = "Smoke";
     public const string PatientLastName = "TestPatient";
 
-    public const string SurgeryTypeCode = "SMKT";
+    public const string SurgeryTypeCode = "SMKT2";
     public const string SurgeryTypeName = "Smoke test surgery type";
 
     public const string RootName = "smoketest-org";
-    public const string PartName = "smoketest-dept";
-    public const string PartNameUpdated = "smoketest-dept-updated";
+    public const string DepartmentPartName = "smoketest-department";
+    public const string OperatingRoomPartName = "smoketest-or";
+    public const string OperatingRoomPartNameUpdated = "smoketest-or-updated";
+    public const string NumberMedicalHistory = "SMKT-12345";
 
     public const string EmployeeComment = "smoketest";
     public const string EmployeeFirstName = "Smoke";

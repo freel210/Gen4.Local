@@ -66,6 +66,7 @@ Directory.CreateDirectory(tempPath);
 
 const int hisPort = 5200;
 const int corePort = 5100;
+const int coreMasterPort = 5110;
 const int styxPort = 5050;
 
 // Without a health check Aspire considers a resource ready the moment its process is spawned and
@@ -111,6 +112,7 @@ coreApi
     .WithEnvironment("HIS_ENDPOINT", hisApi.GetEndpoint("https").HostPort())
     .WithEnvironment("STYX_ENDPOINT", styxApi.GetEndpoint("grpc").HostPort())
     .WithEndpoint(port: corePort, scheme: "https", isProxied: false)
+    .WithEndpoint(port: coreMasterPort, scheme: "https", name: "master", isProxied: false)
     .WaitForCompletion(initJob);
 
 styxApi
@@ -133,8 +135,8 @@ var lyra3Seed = builder.AddProject<Projects.Gen4_Local_Lyra3Seed>("lyra3-seed")
     .WaitFor(mongo);
 
 var lyra3Auth = builder.AddExecutable("lyra3-auth", "dotnet",
-        @"C:\Shared\Repos\Lyra3.HP.Auth.API\Src",
-        @"C:\Shared\Repos\Lyra3.HP.Auth.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Auth.API.dll")
+        @"C:\Repos\Lyra3.HP.Auth.API\Src",
+        @"C:\Repos\Lyra3.HP.Auth.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Auth.API.dll")
     .WithEnvironment("MVS_LYRA3_AUTH_API_SRC", Path.Combine(lyra3ConfigPath, "Auth.API.yml"))
     .WithEndpoint(port: 5052, targetPort: 5052, name: "dmz", isProxied: false)
     .WithEndpoint(port: 3304, targetPort: 3304, name: "public", isProxied: false)

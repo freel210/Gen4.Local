@@ -46,6 +46,10 @@ public static class SmokeTestRunner
 
         await RunPWAScenarioAsync(styx, config, userBundle.AccessToken, logger);
 
+        await RunPWABlockedUserScenarioAsync(styx, config, userBundle.AccessToken, logger);
+
+        await RunUserWithoutLyra3UserScenarioAsync(styx, config, logger);
+
         logger.Info("Refresh: POST /core/api/tokens/user/refresh");
         userBundle = await CoreApiClient.RefreshAsync(styx, "user", userBundle.RefreshToken);
         logger.Info("Refresh: POST /core/api/tokens/admin/refresh");
@@ -58,10 +62,23 @@ public static class SmokeTestRunner
 
         await CheckLyra3AbsoluteUrlsAsync(styx, adminBundle.AccessToken, logger);
 
+        await CheckUnauthorizedAsync(styx, logger);
+
+        await CheckCertOnlyAsync(styx, logger);
+
+        await CheckPdfConvertAsync(styx, userBundle.AccessToken, logger);
+
         var adminToken = adminBundle.AccessToken;
         var userToken = userBundle.AccessToken;
 
         styx.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+
+        // /core/hubs/checklists and /core/api/checklists/monitoring are certificate-only endpoints,
+        // so they must be reached the way a real component reaches them: without a token.
+        var component = new HttpClient(tlsHandler)
+        {
+            BaseAddress = new Uri(config.StyxUrl),
+        };
 
         logger.Info("Connecting to notifications hubs...");
         var tracker = new NotificationTracker();
@@ -76,7 +93,7 @@ public static class SmokeTestRunner
 
         var checklistsChanged = 0;
         await using var checklistsHub = await RetryAsync(
-            () => ConnectHubAsync(config, "/core/hubs/checklists", userToken, connection =>
+            () => ConnectHubAsync(config, "/core/hubs/checklists", null, connection =>
                 connection.On("ChecklistsChanged", new Func<Task>(() =>
                 {
                     Interlocked.Increment(ref checklistsChanged);
@@ -109,6 +126,10 @@ public static class SmokeTestRunner
 
             await RunScenarioAsync(styx, tracker, seeded, userToken, checklistTemplateId, logger);
 
+            logger.Info("Checklists list-full: POST /core/api/checklists/list-full");
+            var listFullBody = await ChecklistApiClient.GetFullChecklistsAsync(styx, userToken);
+            logger.Info("  response: {0}", listFullBody);
+
             logger.Info("Waiting for notifications...");
             var deadline = DateTime.UtcNow.AddSeconds(30);
             while (!tracker.AllMatched && DateTime.UtcNow < deadline)
@@ -129,7 +150,7 @@ public static class SmokeTestRunner
                         throw new InvalidOperationException("no change signal received after checklist create");
                     }
 
-                    var monitoring = await ChecklistApiClient.GetMonitoringChecklistsAsync(styx);
+                    var monitoring = await ChecklistApiClient.GetMonitoringChecklistsAsync(component);
 
                     if (checklistId is Guid created && !monitoring.Any(x => x.Id == created))
                     {
@@ -280,6 +301,150 @@ public static class SmokeTestRunner
         logger.Info("PWA logout rejected a wrong password, accepted the right one, and removed the stored row.");
     }
 
+    private static async Task RunPWABlockedUserScenarioAsync(HttpClient styx, SmokeTestConfig config, string userToken, ConsoleLogger logger)
+    {
+        logger.Info("PWA blocked user: a Lyra3 account that stopped being active must lose its long life token");
+
+        var loginSubject = Guid.Parse(JwtInspector.Parse(userToken).Subject!);
+        await DbSeeder.DeleteLyra3PwaTokenRowsAsync(config.CoreDbConnection, loginSubject);
+
+        TokenResult pwaBundle = null!;
+        await RetryAsync(
+            async () => pwaBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/pwa", TestData.UserLogin, TestData.Password),
+            "PWA login before blocking",
+            logger);
+
+        logger.Info("  disabling the Lyra3 account '{0}'", TestData.UserLogin);
+        await DbSeeder.SetLyra3AccountEnabledAsync(config.Lyra3MongoConnection, TestData.UserLogin, false);
+        try
+        {
+            var status = await CoreApiClient.TryRefreshAsync(styx, "pwa", pwaBundle.RefreshToken);
+            if (status != HttpStatusCode.Unauthorized)
+            {
+                throw new InvalidOperationException($"PWA refresh with a disabled Lyra3 account returned {(int)status}, expected 401.");
+            }
+
+            Expect(await DbSeeder.CountLyra3PwaTokenRowsAsync(config.CoreDbConnection, loginSubject), 0, "row count after a refused refresh");
+            logger.Info("  refresh -> 401 and the lyra3_users_long_life_tokens row was dropped");
+        }
+        finally
+        {
+            await DbSeeder.SetLyra3AccountEnabledAsync(config.Lyra3MongoConnection, TestData.UserLogin, true);
+            logger.Info("  the Lyra3 account '{0}' is enabled again", TestData.UserLogin);
+        }
+
+        TokenResult restoredBundle = null!;
+        await RetryAsync(
+            async () => restoredBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/pwa", TestData.UserLogin, TestData.Password),
+            "PWA login after enabling",
+            logger);
+        CheckPWAToken(restoredBundle.AccessToken, "pwa token after enabling", logger);
+
+        await CoreApiClient.LogoutAsync(styx, "pwa", restoredBundle.RefreshToken, TestData.Password);
+        Expect(await DbSeeder.CountLyra3PwaTokenRowsAsync(config.CoreDbConnection, loginSubject), 0, "row count after the final logout");
+
+        logger.Info("PWA blocked user: the refresh was refused, the stored token was dropped, and a fresh login worked afterwards.");
+    }
+
+    private static async Task RunUserWithoutLyra3UserScenarioAsync(HttpClient styx, SmokeTestConfig config, ConsoleLogger logger)
+    {
+        logger.Info(
+            "Lyra3 account without the {0} role: Gen4 grants {1} and must not expose {0} on Gen4-issued tokens",
+            TestData.Lyra3UserRole,
+            TestData.Gen4UserRole);
+
+        Guid? loginSubject = null;
+        await DbSeeder.SetLyra3AccountRoleAsync(config.Lyra3MongoConnection, TestData.UserLogin, TestData.Lyra3UserRole, false);
+        try
+        {
+            TokenResult userBundle = null!;
+            await RetryAsync(
+                async () => userBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/user", TestData.UserLogin, TestData.Password),
+                "User login without the Lyra3 User role",
+                logger);
+
+            var userClaims = JwtInspector.Parse(userBundle.AccessToken);
+            if (userClaims.Roles.Contains(TestData.Lyra3UserRole, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"/user token carries the Lyra3 {TestData.Lyra3UserRole} role the account does not hold: [{string.Join(", ", userClaims.Roles)}].");
+            }
+
+            if (!userClaims.Roles.Contains(TestData.Gen4UserRole, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"/user token is missing the {TestData.Gen4UserRole} role: [{string.Join(", ", userClaims.Roles)}].");
+            }
+
+            logger.Info("  /user token: {0} present, {1} absent", TestData.Gen4UserRole, TestData.Lyra3UserRole);
+
+            loginSubject = Guid.Parse(userClaims.Subject!);
+            await DbSeeder.DeleteLyra3PwaTokenRowsAsync(config.CoreDbConnection, loginSubject.Value);
+
+            TokenResult pwaBundle = null!;
+            await RetryAsync(
+                async () => pwaBundle = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/pwa", TestData.UserLogin, TestData.Password),
+                "PWA login without the Lyra3 User role",
+                logger);
+
+            var pwaClaims = CheckPWAToken(pwaBundle.AccessToken, "pwa token without the Lyra3 User role", logger);
+
+            var pwaLyra3Status = await GetLyra3StatusAsync(config, "/api/timezoneOffset", pwaClaims.AccessToken);
+            if (pwaLyra3Status != HttpStatusCode.Forbidden)
+            {
+                throw new InvalidOperationException(
+                    $"a PWA token reached the Lyra3 {TestData.Lyra3UserRole}-only endpoint with {(int)pwaLyra3Status}, expected 403.");
+            }
+
+            logger.Info("  PWA token -> Lyra3 {0}-only endpoint: 403", TestData.Lyra3UserRole);
+
+            var userLyra3Status = await GetLyra3StatusAsync(config, "/api/timezoneOffset", userClaims.AccessToken);
+            if (userLyra3Status != HttpStatusCode.Forbidden)
+            {
+                throw new InvalidOperationException(
+                    $"a /user token reached the Lyra3 {TestData.Lyra3UserRole}-only endpoint with {(int)userLyra3Status}, expected 403.");
+            }
+
+            logger.Info("  /user token -> Lyra3 {0}-only endpoint: 403", TestData.Lyra3UserRole);
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/core/api/config/lyra3");
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {userClaims.AccessToken}");
+            using var response = await styx.SendAsync(request);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new InvalidOperationException(
+                    $"/core/api/config/lyra3 returned {(int)response.StatusCode} for a /user token, expected 200.");
+            }
+
+            logger.Info("  /user token -> Gen4 {0}-only endpoint: 200", TestData.Gen4UserRole);
+
+            await CoreApiClient.LogoutAsync(styx, "pwa", pwaBundle.RefreshToken, TestData.Password);
+            logger.Info("  the account without {0} keeps Gen4 access and has no Lyra3 {0} access", TestData.Lyra3UserRole);
+        }
+        finally
+        {
+            await DbSeeder.SetLyra3AccountRoleAsync(config.Lyra3MongoConnection, TestData.UserLogin, TestData.Lyra3UserRole, true);
+            if (loginSubject is Guid subject)
+            {
+                await DbSeeder.DeleteLyra3PwaTokenRowsAsync(config.CoreDbConnection, subject);
+            }
+
+            logger.Info("  the Lyra3 {0} role is restored for '{1}'", TestData.Lyra3UserRole, TestData.UserLogin);
+        }
+    }
+
+    private static async Task<HttpStatusCode> GetLyra3StatusAsync(SmokeTestConfig config, string path, string accessToken)
+    {
+        using var lyra3 = new HttpClient
+        {
+            BaseAddress = new Uri(config.Lyra3CoreUrl),
+        };
+        lyra3.DefaultRequestHeaders.Authorization = new("Bearer", accessToken);
+
+        using var response = await lyra3.GetAsync(path);
+        return response.StatusCode;
+    }
+
     private static async Task CheckLyra3AbsoluteUrlsAsync(HttpClient styx, string adminAccessToken, ConsoleLogger logger)
     {
         logger.Info("Lyra3 absolute URLs: GET /core/api/config/lyra3");
@@ -349,6 +514,67 @@ public static class SmokeTestRunner
         logger.Info("  admin token rejected with 403");
 
         await CoreApiClient.LogoutAsync(styx, "pwa", pwaBundle.RefreshToken, TestData.Password);
+    }
+
+    private static async Task CheckCertOnlyAsync(HttpClient styx, ConsoleLogger logger)
+    {
+        logger.Info("Authorization: cert ok, token missing -> inspect status");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/core/api/checklists/{Guid.NewGuid()}");
+        using var response = await styx.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        logger.Info("  cert-only request -> {0}, body: {1}", (int)response.StatusCode, body);
+    }
+
+    private static async Task CheckPdfConvertAsync(HttpClient styx, string userToken, ConsoleLogger logger)
+    {
+        logger.Info("Pdf: POST /core/api/pdf/convert must keep answering 200 for a valid token");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/core/api/pdf/convert")
+        {
+            Content = JsonContent.Create(new { html = "<html><body>smoketest</body></html>", fileName = "smoketest.pdf" }),
+        };
+        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {userToken}");
+
+        using var response = await styx.SendAsync(request);
+
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(
+                $"pdf convert with a valid token returned {(int)response.StatusCode}, expected 200. Body: {errorBody}");
+        }
+
+        var contentType = response.Content.Headers.ContentType?.MediaType;
+        var length = response.Content.Headers.ContentLength ?? (await response.Content.ReadAsByteArrayAsync()).LongLength;
+
+        if (contentType != "application/pdf" || length == 0)
+        {
+            throw new InvalidOperationException(
+                $"pdf convert returned content-type '{contentType}' and {length} bytes, expected application/pdf and a non-empty body");
+        }
+
+        logger.Info("  valid token -> 200, content-type {0}, {1} bytes", contentType, length);
+    }
+
+    private static async Task CheckUnauthorizedAsync(HttpClient styx, ConsoleLogger logger)
+    {
+        logger.Info("Authorization: an unusable token must answer 401, not 403");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/core/api/checklists/{Guid.NewGuid()}");
+        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {InvalidTokenFactory.Create()}");
+
+        using var response = await styx.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (response.StatusCode != HttpStatusCode.Unauthorized)
+        {
+            throw new InvalidOperationException(
+                $"an unusable token returned {(int)response.StatusCode}, expected 401. Body: {body}");
+        }
+
+        logger.Info("  unusable token -> 401, body: {0}", body);
     }
 
     private static async Task<HttpStatusCode> TryPWALogoutAsync(HttpClient styx, string refreshToken, string? password)
@@ -456,7 +682,21 @@ public static class SmokeTestRunner
             throw new InvalidOperationException($"{what}: missing ClientRole values: {string.Join(", ", missing)}.");
         }
 
-        logger.Info("{0}: aud=lyra3, sub={1}, all {2} ClientRole values present.", what, claims.Subject, TestData.ExpectedUserRoles.Length);
+        foreach (var required in new[] { TestData.Gen4UserRole, TestData.Lyra3UserRole })
+        {
+            if (!claims.Roles.Contains(required, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException($"{what}: missing the {required} role.");
+            }
+        }
+
+        logger.Info(
+            "{0}: aud=lyra3, sub={1}, all {2} ClientRole values present, {3} and {4} present.",
+            what,
+            claims.Subject,
+            TestData.ExpectedUserRoles.Length,
+            TestData.Gen4UserRole,
+            TestData.Lyra3UserRole);
         logger.Info("  roles: {0}", string.Join(", ", claims.Roles.Distinct().OrderBy(role => role, StringComparer.Ordinal)));
         logger.Info("  access token: {0}", accessToken);
     }
@@ -547,29 +787,33 @@ public static class SmokeTestRunner
         tracker.Expect("EmployeeUpdated", employeeId);
         logger.Info("  updated {0}", employeeId);
 
-        logger.Info("Scenario: OrganizationPart create (root + department) /update/delete...");
+        logger.Info("Scenario: OrganizationPart create (root + department + operating room) /update/delete...");
         var rootId = await HisApiClient.AddOrganizationRootAsync(styx, TestData.RootName);
         tracker.Expect("OrganizationPartCreated", rootId);
         logger.Info("  root created {0}", rootId);
 
-        var partId = await HisApiClient.AddOrganizationPartAsync(styx, TestData.PartName, "OperatingRoom", rootId);
-        tracker.Expect("OrganizationPartCreated", partId);
-        logger.Info("  part created {0}", partId);
+        var departmentId = await HisApiClient.AddOrganizationPartAsync(styx, TestData.DepartmentPartName, "Department", rootId);
+        tracker.Expect("OrganizationPartCreated", departmentId);
+        logger.Info("  department created {0}", departmentId);
 
-        await HisApiClient.UpdateOrganizationPartAsync(styx, partId, TestData.PartNameUpdated, "OperatingRoom", rootId);
-        tracker.Expect("OrganizationPartUpdated", partId);
-        logger.Info("  part updated {0}", partId);
+        var operatingRoomId = await HisApiClient.AddOrganizationPartAsync(styx, TestData.OperatingRoomPartName, "OperatingRoom", departmentId);
+        tracker.Expect("OrganizationPartCreated", operatingRoomId);
+        logger.Info("  operating room created {0}", operatingRoomId);
+
+        await HisApiClient.UpdateOrganizationPartAsync(styx, operatingRoomId, TestData.OperatingRoomPartNameUpdated, "OperatingRoom", departmentId);
+        tracker.Expect("OrganizationPartUpdated", operatingRoomId);
+        logger.Info("  operating room updated {0}", operatingRoomId);
 
         logger.Info("Scenario: PlannedSurgery create/update/delete...");
         var start = new DateTime(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
         var end = start.AddHours(1);
-        var surgeryId = await HisApiClient.AddPlannedSurgeryAsync(styx, start, end, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, partId);
+        var surgeryId = await HisApiClient.AddPlannedSurgeryAsync(styx, start, end, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, operatingRoomId);
         tracker.Expect("PlannedSurgeryCreated", surgeryId, start, end);
         logger.Info("  created {0}", surgeryId);
 
         var start2 = start.AddDays(1);
         var end2 = end.AddDays(1);
-        await HisApiClient.UpdatePlannedSurgeryAsync(styx, surgeryId, start2, end2, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, partId);
+        await HisApiClient.UpdatePlannedSurgeryAsync(styx, surgeryId, start2, end2, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, operatingRoomId);
         tracker.Expect("PlannedSurgeryUpdated", surgeryId, start2, end2);
         logger.Info("  updated {0}", surgeryId);
 
@@ -583,12 +827,37 @@ public static class SmokeTestRunner
 
         tracker.Expect("CheckListCreated");
         await ChecklistApiClient.CreateChecklistAsync(styx, userToken, surgeryTypeId, checklistTemplateId);
-        logger.Info("  checklist posted; id will arrive with the CheckListCreated event");
+        var createdChecklistId = await WaitForChecklistCreatedAsync(tracker, logger);
+        logger.Info("  checklist created {0}", createdChecklistId);
+
+        logger.Info("Scenario: Checklist edit (core)...");
+        await ChecklistApiClient.UpdateOperatingRoomAsync(styx, userToken, createdChecklistId, operatingRoomId);
+        logger.Info("  operating room updated");
+        await ChecklistApiClient.UpdateOperatingDepartmentAsync(styx, userToken, createdChecklistId, departmentId);
+        logger.Info("  operating department updated");
+        await ChecklistApiClient.UpdateNumberMedicalHistoryAsync(styx, userToken, createdChecklistId, TestData.NumberMedicalHistory);
+        logger.Info("  number medical history updated");
+
+        var updatedChecklist = await ChecklistApiClient.GetChecklistAsync(styx, userToken, createdChecklistId);
+        if (updatedChecklist.Id != createdChecklistId
+            || updatedChecklist.OperatingRoom?.Id != operatingRoomId
+            || updatedChecklist.OperatingDepartment?.Id != departmentId
+            || updatedChecklist.NumberMedicalHistory != TestData.NumberMedicalHistory)
+        {
+            throw new InvalidOperationException(
+                $"Checklist edit verification failed: room={updatedChecklist.OperatingRoom?.Id}, department={updatedChecklist.OperatingDepartment?.Id}, number='{updatedChecklist.NumberMedicalHistory}'.");
+        }
+
+        logger.Info("  checklist edit verified");
 
         logger.Info("Scenario: deletes...");
-        await HisApiClient.DeleteOrganizationPartAsync(styx, partId);
-        tracker.Expect("OrganizationPartDeleted", partId);
-        logger.Info("  part deleted {0}", partId);
+        await HisApiClient.DeleteOrganizationPartAsync(styx, operatingRoomId);
+        tracker.Expect("OrganizationPartDeleted", operatingRoomId);
+        logger.Info("  operating room deleted {0}", operatingRoomId);
+
+        await HisApiClient.DeleteOrganizationPartAsync(styx, departmentId);
+        tracker.Expect("OrganizationPartDeleted", departmentId);
+        logger.Info("  department deleted {0}", departmentId);
 
         await HisApiClient.DeleteEmployeeAsync(styx, employeeId);
         tracker.Expect("EmployeeDeleted", employeeId);
@@ -599,10 +868,32 @@ public static class SmokeTestRunner
         logger.Info("  surgery type deleted {0}", surgeryTypeId);
     }
 
+    private static async Task<Guid> WaitForChecklistCreatedAsync(NotificationTracker tracker, ConsoleLogger logger)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var id = tracker.SnapshotReceived()
+                .Where(notification => notification.Method == "CheckListCreated")
+                .Select(notification => (Guid?)notification.Id)
+                .LastOrDefault();
+
+            if (id is Guid value)
+            {
+                return value;
+            }
+
+            await Task.Delay(250);
+        }
+
+        logger.Error("CheckListCreated notification was not received within the timeout.");
+        throw new InvalidOperationException("CheckListCreated notification was not received within the timeout.");
+    }
+
     private static async Task<HubConnection> ConnectHubAsync(
         SmokeTestConfig config,
         string path,
-        string userToken,
+        string? userToken,
         Action<HubConnection> registerHandlers)
     {
         var connection = new HubConnectionBuilder()

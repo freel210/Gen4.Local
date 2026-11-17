@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" Version="2.22.0" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
+    <PackageReference Include="Gen4.HP.HIS.Data" Version="1.0.0-202610161034" />
+    <PackageReference Include="Gen4.HP.HIS.Data.Migrations" Version="1.0.0-202610161034" />
+    <PackageReference Include="Gen4.HP.HIS.Domain" Version="1.0.0-202610161034" />
+  </ItemGroup>
+</Project>

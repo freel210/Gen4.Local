@@ -15,13 +15,14 @@
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
     <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.5.4" />
     <PackageReference Include="Aspire.Hosting.Redis" Version="13.5.4" />
+    <PackageReference Include="MessagePack" Version="2.5.303" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.core.srv\src\Gen4.HP.Core.API\Gen4.HP.Core.API.csproj" />
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.his.srv\src\Gen4.HP.HIS.API\Gen4.HP.HIS.API.csproj" />
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\gen4.hp.styx.srv\src\Gen4.HP.Styx.API\Gen4.HP.Styx.API.csproj" />
-    <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Auth.API\Src\Src.csproj" />
+    <ProjectReference Include="..\..\..\..\..\..\Repos\Lyra3.HP.Auth.API\Src\Src.csproj" />
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Core.API\Src\Src.csproj" />
     <ProjectReference Include="..\..\..\..\..\..\Shared\Repos\Lyra3.HP.Jumbo.API\Src\Src.csproj" />
     <ProjectReference Include="..\Gen4.Local.Init\Gen4.Local.Init.csproj" />

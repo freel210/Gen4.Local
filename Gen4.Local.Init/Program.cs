@@ -1,104 +1,118 @@
-﻿using System.Diagnostics;
-using Gen4.HP.Master.CLI;
-using Npgsql;
+﻿using Gen4.HP.Master.CLI;
+using Gen4.HP.Master.CLI.Commands;
+using Gen4.Local.Init;
+using Microsoft.EntityFrameworkCore;
 
-var connectionString = Database.GetConnectionString(Defines.CoreDatabaseConfigPath);
-if (!string.IsNullOrEmpty(connectionString))
+if (string.IsNullOrEmpty(Database.GetConnectionString(Defines.CoreDatabaseConfigPath)))
 {
-    UpsertLyra3Options(connectionString);
+    return 1;
 }
 
-// The Master.CLI commands below belong to one-off system provisioning: schema migration, RSA key
-// import, NATS endpoint and master password. This project is an Aspire resource and therefore starts
-// on every environment launch, where re-running that sequence is unnecessary and destructive (the
-// master password is regenerated). The early return keeps provisioning manual - remove it to run the
-// sequence once against a fresh environment.
-#pragma warning disable CS0162
-return;
+MigrateCoreDatabase();
 
-var masterCliPath = @"C:\Shared\Repos\gen4.hp.master.cli\src\Gen4.HP.Master.CLI\Gen4.HP.Master.CLI.csproj";
+await using var context = Database.CreateDbContext(Defines.CoreDatabaseConfigPath);
 
-var commands = new[]
+if (NeedsEntry(context, Defines.Nats.EndpointKeyName))
 {
-    "--migrate-core-database",
-    "--migrate-his-database",
-    @"--import-rsa-keys C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\privateKey.txt C:\Users\user2\Documents\Projects\Gen4.Local\Lyra3\Keys\publicKey.txt",
-    "--set-nats-endpoint nats:nats@127.0.0.1:4222",
-    "--generate-master-password"
-};
-
-int exitCode = 0;
-foreach (var cmd in commands)
-{
-    Console.WriteLine($"\n{cmd}");
-    exitCode = RunDotNetRun(masterCliPath, cmd);
-
-    if (exitCode != 0)
+    if (await SetNatsEndpointCommand.Run([LocalDefines.Nats.Endpoint]) != 0)
     {
-        Console.WriteLine($"ERROR: Command '{cmd}' failed with exit code {exitCode}. Aborting.");
-        Environment.Exit(exitCode);
+        return 1;
     }
 }
 
-Console.WriteLine("Done");
-Environment.Exit(0);
-#pragma warning restore CS0162
-
-static void UpsertLyra3Options(string connectionString)
+if (NeedsEntry(context, Defines.RsaKeys.PrivateKeyConfigurationName)
+    || NeedsEntry(context, Defines.RsaKeys.PublicKeyConfigurationName))
 {
-    const string isEnabledKey = "/Configuration/Lyra3Options/IsEnabled";
-    const string serviceUrlKey = "/Configuration/Lyra3Options/ServiceUrl";
-    const string serviceUrlValue = "http://localhost";
+    context.PutConfigurationEntry(
+        Defines.RsaKeys.PrivateKeyConfigurationName,
+        File.ReadAllText(LocalDefines.RsaKeys.PrivateKeyPath));
+    context.PutConfigurationEntry(
+        Defines.RsaKeys.PublicKeyConfigurationName,
+        File.ReadAllText(LocalDefines.RsaKeys.PublicKeyPath));
+}
 
-    var entries = new Dictionary<string, string>
+if (NeedsEntry(context, Defines.MasterPassword.PasswordConfigurationKey))
+{
+    if (GenerateMasterPasswordCommand.Run() != 0)
     {
-        [isEnabledKey] = "true",
-        [serviceUrlKey] = serviceUrlValue,
-    };
+        return 1;
+    }
+}
 
+ConfigureLyra3Options(context);
+
+if (NeedsHisMigrations())
+{
+    if (MigrateDatabaseCommand.Run(Defines.DatabaseType.His) != 0)
+    {
+        return 1;
+    }
+}
+
+return 0;
+
+static void MigrateCoreDatabase()
+{
+    var connectionString = Database.GetConnectionString(Defines.CoreDatabaseConfigPath)
+        ?? throw new InvalidOperationException("Failed to get core database connection string.");
+
+    using var dataSource = Gen4.HP.Core.Data.OptionsBuilderExtensions.BuildNpgsqlDataSource(connectionString);
+    var optionsBuilder = new DbContextOptionsBuilder<Gen4.HP.Core.Data.Context>();
+    Gen4.HP.Core.Data.OptionsBuilderExtensions.UseGen4Database(
+        optionsBuilder,
+        dataSource,
+        typeof(Gen4.HP.Core.Data.Migrations.Init).Assembly.GetName().Name);
+
+    using var context = new Gen4.HP.Core.Data.Context(optionsBuilder.Options);
+    var pending = context.Database.GetPendingMigrations().ToList();
+    if (pending.Count == 0)
+    {
+        return;
+    }
+
+    Console.WriteLine("Applying migrations:");
+    foreach (var migration in pending)
+    {
+        Console.WriteLine($"\t{migration}");
+    }
+
+    context.Database.Migrate();
+}
+
+static bool NeedsHisMigrations()
+{
     try
     {
-        using var dataSource = NpgsqlDataSource.Create(connectionString);
-        foreach (var (key, value) in entries)
-        {
-            using var command = dataSource.CreateCommand(
-                """
-                INSERT INTO configuration_entries (key, value)
-                VALUES (@key, @value)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-                """);
-            command.Parameters.AddWithValue("key", key);
-            command.Parameters.AddWithValue("value", value);
-            command.ExecuteNonQuery();
-            Console.WriteLine($"Upserted configuration entry '{key}' = '{value}'");
-        }
+        using var context = Database.CreateHisDbContext(Defines.HisDatabaseConfigPath);
+        return !context.Database.CanConnect() || context.Database.GetPendingMigrations().Any();
     }
-    catch (Exception e)
+    catch
     {
-        Console.WriteLine($"Failed to upsert Lyra3 options: {e.Message}.");
+        return true;
     }
 }
 
-static int RunDotNetRun(string projectPath, string arguments)
+static bool NeedsEntry(Gen4.HP.Core.Data.Context context, string key)
 {
-    var psi = new ProcessStartInfo
+    return context.ConfigurationEntries.All(entry => entry.Key != key);
+}
+
+static void ConfigureLyra3Options(Gen4.HP.Core.Data.Context context)
+{
+    var entries = new Dictionary<string, string>
     {
-        FileName = "dotnet",
-        Arguments = $"run --project \"{projectPath}\" -- {arguments}",
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true
+        [LocalDefines.Lyra3.IsEnabledKey] = LocalDefines.Lyra3.IsEnabled,
+        [LocalDefines.Lyra3.ServiceUrlKey] = LocalDefines.Lyra3.ServiceUrl,
     };
 
-    using var process = Process.Start(psi)!;
+    foreach (var (key, value) in entries)
+    {
+        if (context.ConfigurationEntries.FirstOrDefault(entry => entry.Key == key)?.Value == value)
+        {
+            continue;
+        }
 
-    process.OutputDataReceived += (s, e) => { if (e.Data != null) Console.WriteLine($"[Master.CLI] {e.Data}"); };
-    process.ErrorDataReceived += (s, e) => { if (e.Data != null) Console.WriteLine($"[Master.CLI ERR] {e.Data}"); };
-
-    process.BeginOutputReadLine();
-    process.BeginErrorReadLine();
-
-    process.WaitForExit();
-    return process.ExitCode;
+        context.PutConfigurationEntry(key, value);
+        Console.WriteLine($"Set configuration entry '{key}' = '{value}'");
+    }
 }
