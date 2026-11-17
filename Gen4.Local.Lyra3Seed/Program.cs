@@ -117,6 +117,8 @@ foreach (var collectionDef in collections)
     }
 }
 
+await Lyra3ImportSeed.Seed(db);
+
 var accounts = db.GetCollection<BsonDocument>("accounts");
 var adminFilter = Builders<BsonDocument>.Filter.And(
     Builders<BsonDocument>.Filter.Eq("type", "Administrator"),

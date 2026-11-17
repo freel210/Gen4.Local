@@ -40,6 +40,7 @@ if (NeedsEntry(context, Defines.MasterPassword.PasswordConfigurationKey))
 }
 
 ConfigureLyra3Options(context);
+ConfigureJeconbol3Options(context);
 
 if (NeedsHisMigrations())
 {
@@ -48,6 +49,8 @@ if (NeedsHisMigrations())
         return 1;
     }
 }
+
+ConfigureJeconbol3OperatingRoom();
 
 return 0;
 
@@ -103,6 +106,7 @@ static void ConfigureLyra3Options(Gen4.HP.Core.Data.Context context)
     {
         [LocalDefines.Lyra3.IsEnabledKey] = LocalDefines.Lyra3.IsEnabled,
         [LocalDefines.Lyra3.ServiceUrlKey] = LocalDefines.Lyra3.ServiceUrl,
+        [LocalDefines.Lyra3.AuthApiAbsoluteUrlKey] = LocalDefines.Lyra3.AuthApiAbsoluteUrl,
     };
 
     foreach (var (key, value) in entries)
@@ -115,4 +119,61 @@ static void ConfigureLyra3Options(Gen4.HP.Core.Data.Context context)
         context.PutConfigurationEntry(key, value);
         Console.WriteLine($"Set configuration entry '{key}' = '{value}'");
     }
+}
+
+static void ConfigureJeconbol3Options(Gen4.HP.Core.Data.Context context)
+{
+    var entries = new Dictionary<string, string>
+    {
+        [LocalDefines.Jeconbol3.IsEnabledKey] = LocalDefines.Jeconbol3.IsEnabled,
+        [LocalDefines.Jeconbol3.ServiceUrlKey] = LocalDefines.Jeconbol3.ServiceUrl,
+        [LocalDefines.Jeconbol3.MinutesUpdateIntervalKey] = LocalDefines.Jeconbol3.MinutesUpdateInterval,
+        [LocalDefines.Jeconbol3.ExportMinutesIntervalKey] = LocalDefines.Jeconbol3.ExportMinutesInterval,
+    };
+
+    foreach (var (key, value) in entries)
+    {
+        if (context.ConfigurationEntries.FirstOrDefault(entry => entry.Key == key)?.Value == value)
+        {
+            continue;
+        }
+
+        context.PutConfigurationEntry(key, value);
+        Console.WriteLine($"Set configuration entry '{key}' = '{value}'");
+    }
+}
+
+static void ConfigureJeconbol3OperatingRoom()
+{
+    var connectionString = Database.GetConnectionString(Defines.HisDatabaseConfigPath);
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        Console.WriteLine("Failed to get HIS database connection string. Jeconbol3 operating room skipped.");
+        return;
+    }
+
+    using var context = Database.CreateHisDbContextFromConnectionString(connectionString);
+    var roomId = Guid.Parse(LocalDefines.Jeconbol3.OperatingRoomId);
+
+    if (context.OrganizationParts.Any(part => part.Id == roomId))
+    {
+        return;
+    }
+
+    context.OrganizationParts.Add(new Gen4.HP.HIS.Domain.Entities.OrganizationPart
+    {
+        Id = roomId,
+        Name = LocalDefines.Jeconbol3.OperatingRoomName,
+        Type = Gen4.HP.HIS.Domain.Enums.OrganizationPartType.OperatingRoom,
+    });
+
+    context.OperatingRoomAdditionalInfos.Add(new Gen4.HP.HIS.Domain.Entities.OperatingRoomAdditionalInfo
+    {
+        OrganizationPartId = roomId,
+        ExternalHisId = LocalDefines.Jeconbol3.OperatingRoomExternalHisId,
+        ExternalHisType = LocalDefines.Jeconbol3.ExternalHisType,
+    });
+
+    context.SaveChanges();
+    Console.WriteLine($"Created Jeconbol3 operating room '{roomId}'");
 }

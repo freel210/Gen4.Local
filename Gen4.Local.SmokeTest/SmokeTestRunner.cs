@@ -1,5 +1,8 @@
+using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Gen4.Local.SmokeTest.Infrastructure;
 using Gen4.Local.SmokeTest.Notifications;
@@ -124,7 +127,9 @@ public static class SmokeTestRunner
             var readinessSignals = Volatile.Read(ref checklistsChanged);
             logger.Info("  Checklists hub readiness signals: {0}", readinessSignals);
 
-            await RunScenarioAsync(styx, tracker, seeded, userToken, checklistTemplateId, logger);
+            await RunScenarioAsync(styx, config, tracker, seeded, userToken, checklistTemplateId, logger);
+
+        await RunJeconbolScenarioAsync(styx, config, logger);
 
             logger.Info("Checklists list-full: POST /core/api/checklists/list-full");
             var listFullBody = await ChecklistApiClient.GetFullChecklistsAsync(styx, userToken);
@@ -457,6 +462,7 @@ public static class SmokeTestRunner
 
         string[] expectedProperties =
         [
+            "authApiAbsoluteUrl",
             "jumboApiAbsoluteUrl",
             "coreApiAbsoluteUrl",
             "conferenceApiAbsoluteUrl",
@@ -492,6 +498,11 @@ public static class SmokeTestRunner
                     $"lyra3 absolute urls: '{name}' is '{value}', expected a non-empty url.");
             }
         }
+
+        Expect(
+            doc.RootElement.TryGetProperty("authApiAbsoluteUrl", out var authApiElement) ? authApiElement.GetString() : null,
+            "http://localhost:3304",
+            "lyra3 auth api absolute url");
 
         logger.Info(
             "  pwa token accepted, all {0} urls present: {1}",
@@ -767,7 +778,7 @@ public static class SmokeTestRunner
         return false;
     }
 
-    private static async Task RunScenarioAsync(HttpClient styx, NotificationTracker tracker, SeededData seeded, string userToken, Guid checklistTemplateId, ConsoleLogger logger)
+    private static async Task RunScenarioAsync(HttpClient styx, SmokeTestConfig config, NotificationTracker tracker, SeededData seeded, string userToken, Guid checklistTemplateId, ConsoleLogger logger)
     {
         logger.Info("Scenario: SurgeryType create/update/delete...");
         var surgeryTypeId = await HisApiClient.CreateSurgeryTypeAsync(styx, TestData.SurgeryTypeCode, TestData.SurgeryTypeName);
@@ -816,6 +827,8 @@ public static class SmokeTestRunner
         await HisApiClient.UpdatePlannedSurgeryAsync(styx, surgeryId, start2, end2, seeded.PatientId, seeded.DiagnosisId, surgeryTypeId, operatingRoomId);
         tracker.Expect("PlannedSurgeryUpdated", surgeryId, start2, end2);
         logger.Info("  updated {0}", surgeryId);
+
+        await RunFhirScenarioAsync(styx, config, operatingRoomId, start2, end2, userToken, logger);
 
         await HisApiClient.DeletePlannedSurgeryAsync(styx, surgeryId);
         tracker.Expect("PlannedSurgeryDeleted", surgeryId, start2, end2);
@@ -866,6 +879,1029 @@ public static class SmokeTestRunner
         await HisApiClient.DeleteSurgeryTypeAsync(styx, surgeryTypeId);
         tracker.Expect("SurgeryTypeDeleted", surgeryTypeId);
         logger.Info("  surgery type deleted {0}", surgeryTypeId);
+    }
+
+    private static async Task RunFhirScenarioAsync(
+        HttpClient styx,
+        SmokeTestConfig config,
+        Guid operatingRoomId,
+        DateTime surgeryStart,
+        DateTime surgeryEnd,
+        string userToken,
+        ConsoleLogger logger)
+    {
+        logger.Info("Scenario: FHIR facade impersonating Ariadna (through styx)...");
+
+        await DbSeeder.SeedFhirPatientsAsync(config.HisDbConnection);
+        var apiKey = await DbSeeder.GetFhirApiKeyAsync(config.CoreDbConnection);
+
+        using (var response = await PostFhirAuthAsync(styx, "00000000000000000000"))
+        {
+            Expect(response.StatusCode, HttpStatusCode.Unauthorized, "auth-fhir with a wrong api key");
+        }
+
+        string token;
+        using (var response = await PostFhirAuthAsync(styx, apiKey))
+        {
+            Expect(response.StatusCode, HttpStatusCode.OK, "auth-fhir status");
+            token = ReadAccessToken(await response.Content.ReadAsStringAsync());
+        }
+
+        logger.Info("  auth-fhir returned an access token");
+
+        var patientPage = await GetFhirJsonAsync(
+            styx,
+            token,
+            $"/mvs-service/fhir/Patient?name={TestData.FhirPatientLastName}&_count=1");
+
+        Expect(patientPage.GetProperty("total").GetInt32(), 3, "patient bundle total");
+        Expect(patientPage.GetProperty("entry").GetArrayLength(), 1, "patient bundle page size");
+
+        var firstPatientId = GetResourceId(patientPage, 0);
+        Expect(Guid.TryParse(firstPatientId, out _), true, "patient id is a guid");
+
+        var nextLink = GetLink(patientPage, "next");
+        if (nextLink is null)
+        {
+            throw new InvalidOperationException("Patient bundle has no next link although total is 3 and page size is 1.");
+        }
+
+        Expect(nextLink.StartsWith(config.StyxUrl, StringComparison.OrdinalIgnoreCase), true, "next link is absolute");
+        Expect(nextLink.Contains("/mvs-service/fhir/Patient", StringComparison.Ordinal), true, "next link path");
+
+        var secondPage = await GetFhirJsonAsync(
+            styx,
+            token,
+            $"/mvs-service/fhir/Patient?name={TestData.FhirPatientLastName}&_count=1&_getpagesoffset=1");
+
+        Expect(GetResourceId(secondPage, 0) == firstPatientId, false, "second patient page differs from the first");
+
+        var singlePatient = await GetFhirJsonAsync(styx, token, $"/mvs-service/fhir/Patient/{firstPatientId}");
+        Expect(TryGetString(singlePatient, "id"), firstPatientId, "patient by id");
+
+        using (var response = await SendFhirAsync(styx, HttpMethod.Get, "/mvs-service/fhir/Patient/11111111-1111-1111-1111-111111111111", token))
+        {
+            Expect(response.StatusCode, HttpStatusCode.NotFound, "unknown patient id");
+        }
+
+        var seededPatient = await GetFhirJsonAsync(
+            styx,
+            token,
+            $"/mvs-service/fhir/Patient?name={TestData.PatientLastName}&_count=1");
+
+        var seededPatientId = GetResourceId(seededPatient, 0);
+        Expect(Guid.TryParse(seededPatientId, out _), true, "seeded patient id is a guid");
+
+        var doctors = await GetFhirJsonAsync(
+            styx,
+            token,
+            $"/mvs-service/fhir/Practitioner?name={TestData.EmployeeLastName}&_count=1");
+
+        Expect(doctors.GetProperty("total").GetInt32() >= 1, true, "practitioner bundle total");
+
+        var doctorId = GetResourceId(doctors, 0);
+        Expect(Guid.TryParse(doctorId, out _), true, "practitioner id is a guid");
+
+        var doctorsById = await GetFhirJsonAsync(styx, token, $"/mvs-service/fhir/Practitioner?id={doctorId}");
+        Expect(doctorsById.GetProperty("total").GetInt32(), 1, "practitioner bundle by id");
+
+        var doctorsExcluding = await GetFhirJsonAsync(styx, token, $"/mvs-service/fhir/Practitioner?id%3Anot={doctorId}");
+        Expect(ContainsResourceId(doctorsExcluding, doctorId), false, "practitioner id:not filter");
+
+        var locations = await GetFhirJsonAsync(styx, token, $"/mvs-service/fhir/Location?name={TestData.OperatingRoomPartNameUpdated}");
+        Expect(locations.GetProperty("total").GetInt32() >= 1, true, "location bundle total");
+        Expect(GetLink(locations, "last") is null, true, "location bundle has no last link");
+        Expect(ContainsResourceId(locations, operatingRoomId.ToString()), true, "location bundle contains the operating room");
+
+        var from = Uri.EscapeDataString(surgeryStart.AddHours(-1).ToString("o"));
+        var to = Uri.EscapeDataString(surgeryEnd.AddHours(1).ToString("o"));
+
+        var procedures = await GetFhirJsonAsync(
+            styx,
+            token,
+            $"/mvs-service/fhir/Procedure?startDate={from}&endDate={to}&status=preparation&_count=1");
+
+        Expect(procedures.GetProperty("total").GetInt32() >= 1, true, "procedure bundle total");
+        Expect(GetLink(procedures, "last") is null, true, "procedure bundle has no last link");
+
+        var procedure = procedures.GetProperty("entry")[0].GetProperty("resource");
+        var procedureId = TryGetString(procedure, "id") ?? string.Empty;
+
+        Expect(Guid.TryParse(procedureId, out _), true, "procedure id is a guid");
+        Expect(TryGetString(procedure.GetProperty("subject"), "reference"), $"Patient/{seededPatientId}", "procedure subject reference");
+        Expect(TryGetString(procedure.GetProperty("location"), "reference"), $"Location/{operatingRoomId}", "procedure location reference");
+
+        var performed = procedure.TryGetProperty("performedPeriod", out var performedPeriod)
+            ? performedPeriod
+            : procedure.GetProperty("performed");
+
+        Expect(TryGetString(performed, "start") is not null, true, "procedure performed period start");
+        Expect(
+            TryGetString(procedure.GetProperty("category").GetProperty("coding")[0], "display"),
+            TestData.SurgeryTypeName,
+            "procedure category display");
+
+        var continuation = await GetFhirJsonAsync(
+            styx,
+            token,
+            $"/mvs-service/fhir/?startDate={from}&endDate={to}&status=preparation&_count=1&_getpagesoffset=0");
+
+        Expect(GetResourceId(continuation, 0), procedureId, "procedure continuation through the FHIR root");
+
+        var procedureXml = $"""
+            <Procedure xmlns="http://hl7.org/fhir">
+              <status value="completed"/>
+              <subject><reference value="Patient/{seededPatientId}"/></subject>
+              <performedPeriod>
+                <start value="{surgeryStart:o}"/>
+                <end value="{surgeryEnd:o}"/>
+              </performedPeriod>
+            </Procedure>
+            """;
+
+        string createdId;
+        using (var content = new StringContent(procedureXml, Encoding.UTF8, "application/fhir+xml"))
+        using (var response = await SendFhirAsync(styx, HttpMethod.Post, "/mvs-service/fhir/Procedure", token, content))
+        {
+            Expect(response.StatusCode, HttpStatusCode.OK, "procedure create status");
+            createdId = TryGetString(ReadJsonObject(await response.Content.ReadAsStringAsync()), "id") ?? string.Empty;
+        }
+
+        Expect(string.IsNullOrWhiteSpace(createdId), false, "procedure create returned an id");
+
+        using (var content = new StringContent(procedureXml, Encoding.UTF8, "application/fhir+xml"))
+        using (var response = await SendFhirAsync(styx, HttpMethod.Put, $"/mvs-service/fhir/Procedure/{createdId}", token, content))
+        {
+            Expect(response.StatusCode, HttpStatusCode.OK, "procedure update status");
+            Expect(TryGetString(ReadJsonObject(await response.Content.ReadAsStringAsync()), "id"), createdId, "procedure update id");
+        }
+
+        logger.Info("  FHIR facade scenario passed");
+
+        await RunLyra3IntegrationAsync(config, userToken, operatingRoomId, surgeryStart, surgeryEnd, logger);
+    }
+
+    private static async Task RunJeconbolScenarioAsync(HttpClient styx, SmokeTestConfig config, ConsoleLogger logger)
+    {
+        logger.Info("Scenario: Jeconbol contract (emulator)...");
+
+        using var jeconbol = new HttpClient { BaseAddress = new Uri(config.JeconbolUrl) };
+        var roomExternalId = config.JeconbolOperatingRoomExternalId;
+
+        var rooms = await PostJeconbolAsync(jeconbol, "/operations/objectlist", new
+        {
+            index = "OperationRoom",
+            list = new[] { new { id = roomExternalId } },
+        });
+
+        Expect(TryGetString(rooms, "index"), "OperationRoom", "objectlist index");
+        Expect(rooms.GetProperty("list").GetArrayLength(), 1, "objectlist room count");
+        Expect(
+            TryGetString(rooms.GetProperty("list")[0].GetProperty("object"), "id"),
+            roomExternalId,
+            "objectlist room id");
+
+        var schedule = await PostJeconbolAsync(jeconbol, "/operations/operationroomschedule", new
+        {
+            date = DateTime.Today.ToString("o"),
+            operRoomId = roomExternalId,
+        });
+
+        Expect(schedule.GetProperty("list").GetArrayLength() >= 1, true, "schedule is not empty");
+
+        var surgery = schedule.GetProperty("list")[0].GetProperty("operation");
+        var surgeryId = TryGetString(surgery, "id")
+            ?? throw new InvalidOperationException("schedule surgery id is missing");
+        var patientId = TryGetString(surgery, "patientId")
+            ?? throw new InvalidOperationException("schedule surgery patient id is missing");
+        var operatorId = TryGetString(surgery, "plannedOperator")
+            ?? throw new InvalidOperationException("schedule surgery operator id is missing");
+
+        var patients = await PostJeconbolAsync(jeconbol, "/operations/objectlist", new
+        {
+            index = "Patient",
+            list = new[] { new { id = patientId } },
+        });
+
+        Expect(patients.GetProperty("list").GetArrayLength(), 1, "objectlist patient count");
+        Expect(
+            TryGetString(patients.GetProperty("list")[0].GetProperty("object"), "id"),
+            patientId,
+            "objectlist patient id");
+
+        var persons = await PostJeconbolAsync(jeconbol, "/operations/objectlist", new
+        {
+            index = "Person",
+            list = new[] { new { id = operatorId } },
+        });
+
+        Expect(persons.GetProperty("list").GetArrayLength(), 1, "objectlist person count");
+
+        logger.Info("  Jeconbol contract passed, surgery {0}", surgeryId);
+
+        logger.Info("Scenario: operating room binding through the Gen4 API...");
+
+        var adminToken = await GetAdminTokenAsync(styx, config, logger);
+
+        Guid rootId;
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Get, "/his/api/organization/parts", adminToken))
+        {
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            rootId = body.EnumerateArray()
+                .First(part => TryGetString(part, "type") == "Organization")
+                .GetProperty("id")
+                .GetGuid();
+        }
+
+        Guid boundRoomId;
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartName,
+            type = "OperatingRoom",
+            partOf = rootId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Post, "/his/api/organization/parts", adminToken, content))
+        {
+            EnsureSuccess(response, "organization part create");
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            boundRoomId = body.GetProperty("id").GetGuid();
+            Expect(TryGetString(body, "externalHisId") is null, true, "new room has no external id");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartName,
+            type = "OperatingRoom",
+            partOf = rootId,
+            externalHisId = TestData.JeconbolSecondOperatingRoomExternalId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{boundRoomId}", adminToken, content))
+        {
+            EnsureSuccess(response, "organization part external id binding");
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            Expect(
+                TryGetString(body, "externalHisId"),
+                TestData.JeconbolSecondOperatingRoomExternalId,
+                "binding response external id");
+        }
+
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Get, $"/his/api/organization/parts/{boundRoomId}", adminToken))
+        {
+            EnsureSuccess(response, "organization part get by id");
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            Expect(TryGetString(body, "externalHisId"), TestData.JeconbolSecondOperatingRoomExternalId, "get by id external id");
+        }
+
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Get, "/his/api/organization/parts", adminToken))
+        {
+            EnsureSuccess(response, "organization parts list");
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            var listed = body.EnumerateArray().First(part => part.GetProperty("id").GetGuid() == boundRoomId);
+            Expect(TryGetString(listed, "externalHisId"), TestData.JeconbolSecondOperatingRoomExternalId, "list external id");
+        }
+
+        using (var response = await SendAuthorizedAsync(
+            styx,
+            HttpMethod.Get,
+            $"/his/api/organization/parts/checkExternalHisExistence/{TestData.JeconbolSecondOperatingRoomExternalId}",
+            adminToken))
+        {
+            EnsureSuccess(response, "external his room existence check");
+        }
+
+        using (var response = await SendAuthorizedAsync(
+            styx,
+            HttpMethod.Get,
+            "/his/api/organization/parts/checkExternalHisExistence/99999999-9999-9999-9999-999999999999",
+            adminToken))
+        {
+            Expect(response.StatusCode, HttpStatusCode.UnprocessableEntity, "unknown external his room");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartNameUpdated,
+            type = "OperatingRoom",
+            partOf = rootId,
+            externalHisId = TestData.JeconbolSecondOperatingRoomExternalId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{boundRoomId}", adminToken, content))
+        {
+            EnsureSuccess(response, "organization part rename with external id");
+        }
+
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Get, $"/his/api/organization/parts/{boundRoomId}", adminToken))
+        {
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            Expect(TryGetString(body, "name"), TestData.JeconbolOperatingRoomPartNameUpdated, "renamed part name");
+            Expect(TryGetString(body, "externalHisId"), TestData.JeconbolSecondOperatingRoomExternalId, "binding survives a rename");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartNameUpdated,
+            type = "OperatingRoom",
+            partOf = rootId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{boundRoomId}", adminToken, content))
+        {
+            EnsureSuccess(response, "organization part rename without external id");
+        }
+
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Get, $"/his/api/organization/parts/{boundRoomId}", adminToken))
+        {
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            Expect(TryGetString(body, "externalHisId") is null, true, "put without external id unbinds");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartNameUpdated,
+            type = "OperatingRoom",
+            partOf = rootId,
+            externalHisId = "not-a-guid",
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{boundRoomId}", adminToken, content))
+        {
+            Expect(response.StatusCode, HttpStatusCode.BadRequest, "non-guid external id");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolDepartmentPartName,
+            type = "Department",
+            partOf = rootId,
+            externalHisId = TestData.JeconbolSecondOperatingRoomExternalId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Post, "/his/api/organization/parts", adminToken, content))
+        {
+            Expect(response.StatusCode, HttpStatusCode.UnprocessableEntity, "external id on a department");
+        }
+
+        Guid secondRoomId;
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolSecondRoomPartName,
+            type = "OperatingRoom",
+            partOf = rootId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Post, "/his/api/organization/parts", adminToken, content))
+        {
+            EnsureSuccess(response, "second organization part create");
+            var body = ReadJsonObject(await response.Content.ReadAsStringAsync());
+            secondRoomId = body.GetProperty("id").GetGuid();
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartNameUpdated,
+            type = "OperatingRoom",
+            partOf = rootId,
+            externalHisId = TestData.JeconbolSecondOperatingRoomExternalId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{boundRoomId}", adminToken, content))
+        {
+            EnsureSuccess(response, "organization part rebinding");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolSecondRoomPartName,
+            type = "OperatingRoom",
+            partOf = rootId,
+            externalHisId = TestData.JeconbolSecondOperatingRoomExternalId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{secondRoomId}", adminToken, content))
+        {
+            Expect(response.StatusCode, HttpStatusCode.Conflict, "duplicate external id");
+        }
+
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Delete, $"/his/api/organization/parts/{secondRoomId}", adminToken))
+        {
+            EnsureSuccess(response, "second organization part delete");
+        }
+
+        using (var content = JsonBody(new
+        {
+            name = TestData.JeconbolOperatingRoomPartNameUpdated,
+            type = "OperatingRoom",
+            partOf = rootId,
+        }))
+        using (var response = await SendAuthorizedAsync(styx, HttpMethod.Put, $"/his/api/organization/parts/{boundRoomId}", adminToken, content))
+        {
+            EnsureSuccess(response, "organization part external id unbinding");
+        }
+
+        logger.Info("  binding scenario passed");
+
+        logger.Info("Scenario: Jeconbol configuration through the Gen4 API...");
+
+        var jeconbolConfiguration = await GetJeconbolConfigurationAsync(styx, adminToken);
+        var originalAuthorization = TryGetString(jeconbolConfiguration, "authorization") ?? string.Empty;
+
+        await PutJeconbolConfigurationAsync(styx, adminToken, jeconbolConfiguration, TestData.JeconbolTestAuthorization);
+
+        var updatedConfiguration = await RetryAsync(
+            async () =>
+            {
+                var current = await GetJeconbolConfigurationAsync(styx, adminToken);
+
+                return TryGetString(current, "authorization") == TestData.JeconbolTestAuthorization
+                    ? current
+                    : throw new InvalidOperationException("Jeconbol configuration was not updated.");
+            },
+            "Jeconbol configuration update",
+            logger,
+            TimeSpan.FromSeconds(30));
+
+        Expect(
+            TryGetString(updatedConfiguration, "serviceUrl"),
+            TryGetString(jeconbolConfiguration, "serviceUrl"),
+            "jeconbol service url is kept");
+
+        await PutJeconbolConfigurationAsync(styx, adminToken, updatedConfiguration, originalAuthorization);
+
+        await RetryAsync(
+            async () =>
+            {
+                var current = await GetJeconbolConfigurationAsync(styx, adminToken);
+
+                return TryGetString(current, "authorization") == originalAuthorization
+                    ? true
+                    : throw new InvalidOperationException("Jeconbol configuration was not restored.");
+            },
+            "Jeconbol configuration restore",
+            logger,
+            TimeSpan.FromSeconds(30));
+
+        logger.Info("  configuration scenario passed");
+
+        logger.Info("Scenario: Jeconbol import into HIS...");
+
+        async Task<JsonElement> GetJeconbolConfigurationAsync(HttpClient client, string token)
+        {
+            using var response = await SendAuthorizedAsync(client, HttpMethod.Get, "/core/api/config/jeconbol", token);
+            EnsureSuccess(response, "jeconbol configuration get");
+
+            return ReadJsonObject(await response.Content.ReadAsStringAsync());
+        }
+
+        async Task PutJeconbolConfigurationAsync(HttpClient client, string token, JsonElement current, string authorization)
+        {
+            using var content = JsonBody(new
+            {
+                isEnabled = current.GetProperty("isEnabled").GetBoolean(),
+                serviceUrl = TryGetString(current, "serviceUrl") ?? string.Empty,
+                authorization,
+            });
+            using var response = await SendAuthorizedAsync(client, HttpMethod.Put, "/core/api/config/jeconbol", token, content);
+            EnsureSuccess(response, "jeconbol configuration put");
+        }
+
+        var apiKey = await DbSeeder.GetFhirApiKeyAsync(config.CoreDbConnection);
+        string token;
+        using (var response = await PostFhirAuthAsync(styx, apiKey))
+        {
+            EnsureSuccess(response, "auth-fhir");
+            token = ReadAccessToken(await response.Content.ReadAsStringAsync());
+        }
+
+        var from = Uri.EscapeDataString(DateTime.Today.AddDays(-1).ToString("o"));
+        var to = Uri.EscapeDataString(DateTime.Today.AddDays(9).ToString("o"));
+
+        var procedures = await RetryAsync(
+            async () =>
+            {
+                var bundle = await GetFhirJsonAsync(
+                    styx,
+                    token,
+                    $"/mvs-service/fhir/Procedure?startDate={from}&endDate={to}&status=preparation&_count=50");
+
+                return bundle.GetProperty("total").GetInt32() > 0
+                    ? bundle
+                    : throw new InvalidOperationException("No planned surgeries imported from Jeconbol yet.");
+            },
+            "Jeconbol import",
+            logger,
+            TimeSpan.FromMinutes(4));
+
+        var entryCount = procedures.GetProperty("entry").GetArrayLength();
+        var ids = new HashSet<string>();
+
+        for (var index = 0; index < entryCount; index++)
+        {
+            var resourceId = GetResourceId(procedures, index);
+            Expect(ids.Add(resourceId), true, "imported procedure ids are unique");
+        }
+
+        var procedure = procedures.GetProperty("entry")[0].GetProperty("resource");
+        var plannedSurgeryId = TryGetString(procedure, "id") ?? string.Empty;
+        var subjectReference = TryGetString(procedure.GetProperty("subject"), "reference") ?? string.Empty;
+        var locationReference = GetProcedureLocationReference(procedure);
+
+        Expect(subjectReference.StartsWith("Patient/", StringComparison.Ordinal), true, "imported procedure subject");
+        Expect(locationReference.StartsWith("Location/", StringComparison.Ordinal), true, "imported procedure location");
+        Expect(entryCount >= 2, true, "at least two imported procedures");
+
+        var secondProcedure = procedures.GetProperty("entry")[1].GetProperty("resource");
+        var secondPlannedSurgeryId = TryGetString(secondProcedure, "id") ?? string.Empty;
+        var secondSubjectReference = TryGetString(secondProcedure.GetProperty("subject"), "reference") ?? string.Empty;
+        var secondLocationReference = GetProcedureLocationReference(secondProcedure);
+
+        var jeconbolStartTimes = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        for (var dayShift = 0; dayShift < TestData.JeconbolImportDaysAhead; dayShift++)
+        {
+            var roomSchedule = await PostJeconbolAsync(
+                jeconbol,
+                "/operations/operationroomschedule",
+                new
+                {
+                    date = DateTime.Now.Date.AddDays(dayShift),
+                    operRoomId = config.JeconbolOperatingRoomExternalId,
+                });
+
+            foreach (var item in roomSchedule.GetProperty("list").EnumerateArray())
+            {
+                var operation = item.GetProperty("operation");
+
+                if (TryGetString(operation, "id") is { } externalId
+                    && TryGetString(operation, "plannedTime") is { } plannedTime)
+                {
+                    jeconbolStartTimes[externalId] = ParseJeconbolInstant(plannedTime);
+                }
+            }
+        }
+
+        var importedPlans = await HisDbReader.ReadJeconbolPlannedSurgeryTimesAsync(config.HisDbConnection);
+
+        var comparablePlans = importedPlans
+            .Where(plan => jeconbolStartTimes.ContainsKey(plan.ExternalHisId))
+            .ToList();
+
+        if (comparablePlans.Count == 0)
+        {
+            logger.Info("  import checks skipped: HIS holds no plans of the current Jeconbol schedule");
+        }
+        else
+        {
+            var teamMembers = await RetryAsync(
+                async () =>
+                {
+                    var members = (await HisDbReader.ReadJeconbolPlannedSurgeryTeamAsync(config.HisDbConnection))
+                        .Where(member => jeconbolStartTimes.ContainsKey(member.ExternalHisId))
+                        .ToList();
+
+                    return members.Count > 0
+                           && members.All(member => member.MembersCount == 1)
+                           && members.All(member => member.RoleName == TestData.JeconbolOperatorRoleName)
+                        ? members
+                        : throw new InvalidOperationException(
+                            $"Imported plans must have a single '{TestData.JeconbolOperatorRoleName}' team member.");
+                },
+                "Jeconbol operator role",
+                logger,
+                TimeSpan.FromMinutes(2));
+
+            logger.Info("  operator role check passed ({0} plans)", teamMembers.Count);
+
+            var defaultTimePlans = comparablePlans
+                .Where(plan => plan.Start.Year <= 2000)
+                .ToList();
+
+            Expect(
+                defaultTimePlans.Count,
+                0,
+                $"imported plans keep a real start time, default: {string.Join(", ", defaultTimePlans.Take(3).Select(plan => plan.ExternalHisId))}");
+
+            logger.Info("  import time check passed ({0} plans)", comparablePlans.Count);
+
+            var updatedPlanCount = await RetryAsync(
+                async () =>
+                {
+                    var stamps = await HisDbReader.ReadJeconbolPlannedSurgeryTimesAsync(config.HisDbConnection);
+                    var updated = stamps.Count(stamp =>
+                        jeconbolStartTimes.ContainsKey(stamp.ExternalHisId) && stamp.UpdatedAt > stamp.CreatedAt);
+
+                    return updated > 0
+                        ? updated
+                        : throw new InvalidOperationException(
+                            "No imported planned surgery has been updated since creation yet.");
+                },
+                "Jeconbol import update",
+                logger,
+                TimeSpan.FromMinutes(3));
+
+            logger.Info("  import update check passed ({0} plans updated)", updatedPlanCount);
+        }
+
+        logger.Info("  import scenario passed ({0} procedures)", entryCount);
+
+        logger.Info("Scenario: finished surgery export to Jeconbol...");
+
+        await IngestFinishedSurgery(plannedSurgeryId, subjectReference, locationReference, 90);
+        await IngestFinishedSurgery(secondPlannedSurgeryId, secondSubjectReference, secondLocationReference, 120);
+
+        logger.Info("  export scenario passed");
+
+        async Task<FinishedSurgeryExportState> IngestFinishedSurgery(
+            string planId,
+            string subject,
+            string location,
+            int durationMinutes)
+        {
+            var finishedSurgeryId = Guid.NewGuid();
+            var start = DateTime.UtcNow.AddHours(-3);
+
+            var finishedSurgery = new
+            {
+                resourceType = "Procedure",
+                id = planId,
+                status = "completed",
+                subject = new { reference = subject },
+                location = new[] { new { reference = location } },
+                performedPeriod = new
+                {
+                    start = start.ToString("o"),
+                    end = start.AddMinutes(durationMinutes).ToString("o"),
+                },
+                extension = new[]
+                {
+                    new
+                    {
+                        url = TestData.JeconbolFinishedSurgeryIdExtensionUrl,
+                        valueString = finishedSurgeryId.ToString(),
+                    },
+                },
+            };
+
+            using (var content = new StringContent(JsonSerializer.Serialize(finishedSurgery), Encoding.UTF8, "application/fhir+json"))
+            using (var response = await SendFhirAsync(styx, HttpMethod.Put, $"/mvs-service/fhir/Procedure/{planId}", token, content))
+            {
+                EnsureSuccess(response, "finished surgery ingest");
+            }
+
+            var exported = await RetryAsync(
+                async () =>
+                {
+                    var state = await HisDbReader.ReadFinishedSurgeryAsync(config.HisDbConnection, finishedSurgeryId);
+
+                    return state is { ExportState: TestData.JeconbolExportedState }
+                        ? state.Value
+                        : throw new InvalidOperationException(
+                            state is null
+                                ? $"Finished surgery {finishedSurgeryId} is not in HIS yet."
+                                : $"Surgery {finishedSurgeryId} is not exported yet (state '{state.Value.ExportState}', error '{state.Value.ErrorMessage}').");
+                },
+                "Jeconbol export",
+                logger,
+                TimeSpan.FromMinutes(4));
+
+            Expect(exported.ErrorMessage ?? string.Empty, string.Empty, "exported surgery error message");
+            Expect(
+                exported.Start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
+                start.ToString("yyyy-MM-ddTHH:mm:ss"),
+                "exported surgery start time");
+            Expect(
+                (int)Math.Round((exported.Finish - exported.Start).TotalMinutes),
+                durationMinutes,
+                "exported surgery duration");
+            Expect(exported.PlannedSurgeryExternalHisId is not null, true, "exported planned surgery external id");
+            Expect(exported.PatientExternalHisId is not null, true, "exported patient external id");
+            Expect(exported.OperatingRoomExternalHisId is not null, true, "exported operating room external id");
+            Expect(exported.OperatorExternalHisId is not null, true, "exported operator external id");
+
+            return exported;
+        }
+    }
+
+    private static async Task<JsonElement> PostJeconbolAsync(HttpClient jeconbol, string path, object payload)
+    {
+        using var content = JsonBody(payload);
+        using var response = await jeconbol.PostAsync(path, content);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Jeconbol POST {path} returned {(int)response.StatusCode}: {body}");
+        }
+
+        return ReadJsonObject(body);
+    }
+
+    private static async Task<string> GetAdminTokenAsync(HttpClient styx, SmokeTestConfig config, ConsoleLogger logger)
+    {
+        var token = await CoreApiClient.GetTokenAsync(styx, "/core/api/tokens/admin", TestData.AdminLogin, TestData.Password);
+        return token.AccessToken;
+    }
+
+    private static async Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpClient client,
+        HttpMethod method,
+        string path,
+        string token,
+        HttpContent? content = null)
+    {
+        using var request = new HttpRequestMessage(method, path) { Content = content };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
+    private static void EnsureSuccess(HttpResponseMessage response, string what)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"{what} returned {(int)response.StatusCode}.");
+    }
+
+    private static async Task RunLyra3IntegrationAsync(
+        SmokeTestConfig config,
+        string userToken,
+        Guid operatingRoomId,
+        DateTime surgeryStart,
+        DateTime surgeryEnd,
+        ConsoleLogger logger)
+    {
+        logger.Info("Scenario: live Lyra3 (Jumbo) treating Gen4 as Ariadna...");
+
+        using var jumbo = new HttpClient { BaseAddress = new Uri(config.Lyra3JumboUrl) };
+        using var core = new HttpClient { BaseAddress = new Uri(config.Lyra3CoreUrl) };
+        using var auth = new HttpClient { BaseAddress = new Uri(config.Lyra3AuthUrl) };
+
+        var adminToken = await LoginLyra3AdministratorAsync(auth);
+
+        using (var response = await SendLyra3Async(core, HttpMethod.Delete, "/api/ariadnaConfiguration", adminToken))
+        {
+            Expect(response.StatusCode, HttpStatusCode.OK, "ariadna configuration reset before the run");
+        }
+
+        var apiKey = await DbSeeder.GetFhirApiKeyAsync(config.CoreDbConnection);
+
+        using (var content = JsonBody(new { url = $"{config.StyxUrl.TrimEnd('/')}/", apiKey }))
+        using (var response = await SendLyra3Async(core, HttpMethod.Post, "/api/ariadnaConfiguration", adminToken, content))
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                throw new InvalidOperationException($"Ariadna configuration was rejected: {(int)response.StatusCode} {body}");
+            }
+        }
+
+        logger.Info("  Ariadna configuration accepted by Core and pushed to Jumbo");
+
+        await WaitForHisIntegrationAsync(jumbo, adminToken, "ariadna", logger);
+
+        var patients = await GetLyra3JsonAsync(
+            jumbo,
+            userToken,
+            $"/api/patients?limit=10&pageNumber=0&filter={TestData.FhirPatientLastName}");
+
+        var patientItems = patients.GetProperty("items");
+        Expect(patientItems.GetArrayLength(), 3, "Jumbo patients imported from Gen4");
+
+        Expect(
+            Guid.TryParse(TryGetString(patientItems[0], "id") ?? string.Empty, out _),
+            true,
+            "Jumbo patient id is the Gen4 guid");
+        Expect(TryGetString(patientItems[0], "lastName"), TestData.FhirPatientLastName, "Jumbo patient last name");
+
+        var doctors = await GetLyra3JsonAsync(
+            jumbo,
+            userToken,
+            $"/api/doctors?limit=10&pageNumber=0&filter={TestData.EmployeeLastName}");
+
+        var doctorItems = doctors.GetProperty("items");
+        Expect(doctorItems.GetArrayLength() >= 1, true, "Jumbo doctors imported from Gen4");
+        Expect(
+            Guid.TryParse(TryGetString(doctorItems[0], "id") ?? string.Empty, out _),
+            true,
+            "Jumbo doctor id is the Gen4 guid");
+
+        var from = Uri.EscapeDataString(surgeryStart.AddHours(-1).ToString("o"));
+        var to = Uri.EscapeDataString(surgeryEnd.AddHours(1).ToString("o"));
+
+        var surgeries = await GetLyra3JsonAsync(jumbo, userToken, $"/api/plannedSurgeries?from={from}&to={to}");
+        Expect(surgeries.GetArrayLength() >= 1, true, "Jumbo planned surgeries imported from Gen4");
+
+        var surgery = surgeries[0];
+        Expect(
+            TryGetString(surgery.GetProperty("patient"), "lastName"),
+            TestData.PatientLastName,
+            "Jumbo surgery patient resolved through the Gen4 FHIR references");
+        Expect(
+            Guid.TryParse(TryGetString(surgery, "externalHisId") ?? string.Empty, out _),
+            true,
+            "Jumbo surgery externalHisId is the Gen4 guid");
+        Expect(
+            Guid.TryParse(TryGetString(surgery.GetProperty("patient"), "externalHisId") ?? string.Empty, out _),
+            true,
+            "Jumbo surgery patient externalHisId is the Gen4 guid");
+
+        var locations = await GetLyra3JsonAsync(
+            jumbo,
+            adminToken,
+            $"/api/externalHis/locations?name={TestData.OperatingRoomPartNameUpdated}");
+
+        Expect(locations.GetArrayLength() >= 1, true, "Jumbo external HIS locations imported from Gen4");
+        Expect(
+            locations.EnumerateArray().Any(location => TryGetString(location, "id") == operatingRoomId.ToString()),
+            true,
+            "Jumbo external HIS location matches the Gen4 operating room");
+
+        using (var response = await SendLyra3Async(core, HttpMethod.Delete, "/api/ariadnaConfiguration", adminToken))
+        {
+            Expect(response.StatusCode, HttpStatusCode.OK, "ariadna configuration removal");
+        }
+
+        await WaitForHisIntegrationAsync(jumbo, adminToken, null, logger);
+
+        logger.Info("  live Lyra3 integration scenario passed");
+    }
+
+    private static async Task<string> LoginLyra3AdministratorAsync(HttpClient auth)
+    {
+        using var content = JsonBody(new { login = TestData.Lyra3AdminLogin, password = TestData.Lyra3AdminPassword });
+        using var response = await SendLyra3Async(auth, HttpMethod.Post, "/api/tokens/administrators/byLoginPassword", token: null, content);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Lyra3 administrator login returned {(int)response.StatusCode}: {body}");
+        }
+
+        return TryGetString(ReadJsonObject(body), "accessToken")
+            ?? throw new InvalidOperationException($"Lyra3 administrator login returned no access token: {body}");
+    }
+
+    private static async Task WaitForHisIntegrationAsync(
+        HttpClient jumbo,
+        string adminToken,
+        string? expectedType,
+        ConsoleLogger logger)
+    {
+        const int attempts = 30;
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            using var response = await SendLyra3Async(jumbo, HttpMethod.Get, "/api/integrations/his", adminToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                var type = TryGetString(ReadJsonObject(body), "type");
+
+                if (string.Equals(type, expectedType, StringComparison.Ordinal))
+                {
+                    logger.Info("  Jumbo HIS integration is '{0}'", expectedType ?? "none");
+                    return;
+                }
+            }
+
+            if (attempt < attempts)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        }
+
+        throw new InvalidOperationException($"Jumbo did not switch its HIS integration to '{expectedType ?? "none"}'.");
+    }
+
+    private static async Task<JsonElement> GetLyra3JsonAsync(HttpClient client, string token, string path)
+    {
+        using var response = await SendLyra3Async(client, HttpMethod.Get, path, token);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Lyra3 GET {path} returned {(int)response.StatusCode}: {body}");
+        }
+
+        return ReadJsonObject(body);
+    }
+
+    private static StringContent JsonBody(object payload)
+    {
+        var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        return content;
+    }
+
+    private static async Task<HttpResponseMessage> SendLyra3Async(
+        HttpClient client,
+        HttpMethod method,
+        string path,
+        string? token,
+        HttpContent? content = null)
+    {
+        using var request = new HttpRequestMessage(method, path) { Content = content };
+
+        if (token is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> PostFhirAuthAsync(HttpClient styx, string apiKey)
+    {
+        using var content = JsonContent.Create(new { api_key = apiKey });
+        return await SendFhirAsync(styx, HttpMethod.Post, "/mvs-service/fhir/auth-fhir", token: null, content);
+    }
+
+    private static async Task<HttpResponseMessage> SendFhirAsync(
+        HttpClient styx,
+        HttpMethod method,
+        string path,
+        string? token,
+        HttpContent? content = null)
+    {
+        using var request = new HttpRequestMessage(method, path) { Content = content };
+
+        if (token is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+
+        return await styx.SendAsync(request);
+    }
+
+    private static async Task<JsonElement> GetFhirJsonAsync(HttpClient styx, string token, string path)
+    {
+        using var response = await SendFhirAsync(styx, HttpMethod.Get, path, token);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"FHIR GET {path} returned {(int)response.StatusCode}: {body}");
+        }
+
+        return ReadJsonObject(body);
+    }
+
+    private static JsonElement ReadJsonObject(string body) => JsonDocument.Parse(body).RootElement.Clone();
+
+    private static string ReadAccessToken(string body)
+        => TryGetString(ReadJsonObject(body), "accessToken")
+            ?? throw new InvalidOperationException($"auth-fhir returned no access token: {body}");
+
+    private static string? TryGetString(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static DateTime ParseJeconbolInstant(string value)
+        => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture).UtcDateTime;
+
+    private static string GetProcedureLocationReference(JsonElement procedure)
+    {
+        if (!procedure.TryGetProperty("location", out var locations))
+        {
+            return string.Empty;
+        }
+
+        var location = locations.ValueKind == JsonValueKind.Array ? locations[0] : locations;
+        return TryGetString(location, "reference") ?? string.Empty;
+    }
+
+    private static string GetResourceId(JsonElement bundle, int index)
+        => TryGetString(bundle.GetProperty("entry")[index].GetProperty("resource"), "id") ?? string.Empty;
+
+    private static bool ContainsResourceId(JsonElement bundle, string id)
+    {
+        if (!bundle.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var entry in entries.EnumerateArray())
+        {
+            if (entry.TryGetProperty("resource", out var resource) && TryGetString(resource, "id") == id)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? GetLink(JsonElement bundle, string relation)
+    {
+        if (!bundle.TryGetProperty("link", out var links) || links.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var link in links.EnumerateArray())
+        {
+            if (TryGetString(link, "relation") == relation)
+            {
+                return TryGetString(link, "url");
+            }
+        }
+
+        return null;
     }
 
     private static async Task<Guid> WaitForChecklistCreatedAsync(NotificationTracker tracker, ConsoleLogger logger)

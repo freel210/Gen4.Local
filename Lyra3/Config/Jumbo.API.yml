@@ -27,6 +27,11 @@ AuditOptions:
 RabbitMQClientOptions:
   RabbitMQServiceUri: amqp://lyra3:Passw0rd123@localhost:5673
 
+PasswordOptions:
+  UseStrongAdminPassword: false
+  UseStrongUserPassword: false
+  StrongUserPasswordLength: 10
+
 Jeconbol3Options:
   IsEnabled: false
   ServiceUrl: http://127.0.0.1:9097

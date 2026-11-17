@@ -10,6 +10,45 @@ public readonly record struct Lyra3PwaTokenRow(string RefreshToken, string Login
 
 public static class DbSeeder
 {
+    public static async Task<string> GetFhirApiKeyAsync(string connectionString)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            "SELECT value FROM configuration_entries WHERE key = '/Configuration/FHIRServer/ApiKey';",
+            connection);
+
+        return (string)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("FHIR api key is missing from the core database."));
+    }
+
+    public static async Task<List<Guid>> SeedFhirPatientsAsync(string connectionString)
+    {
+        var ids = new List<Guid>();
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        foreach (var number in new[] { 1, 2, 3 })
+        {
+            await using var command = new NpgsqlCommand(
+                """
+                INSERT INTO patients (first_name, last_name, patronymic, full_name_search_string, comment)
+                VALUES (@firstName, @lastName, NULL, @searchString, @comment)
+                RETURNING id;
+                """,
+                connection);
+            command.Parameters.AddWithValue("@firstName", $"Fhir{number}");
+            command.Parameters.AddWithValue("@lastName", TestData.FhirPatientLastName);
+            command.Parameters.AddWithValue("@searchString", $"{TestData.FhirPatientLastName.ToLower()} fhir{number}");
+            command.Parameters.AddWithValue("@comment", TestData.ConstitutionMarker);
+            ids.Add((Guid)(await command.ExecuteScalarAsync())!);
+        }
+
+        return ids;
+    }
+
     public static async Task<Lyra3PwaTokenRow?> GetLyra3PwaTokenRowAsync(string connectionString, Guid userId)
     {
         await using var connection = new NpgsqlConnection(connectionString);
