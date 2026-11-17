@@ -76,14 +76,24 @@ const int styxPort = 5050;
 var coreListening = new TcpEndpointHealthCheck(corePort);
 var hisListening = new TcpEndpointHealthCheck(hisPort);
 var styxListening = new TcpEndpointHealthCheck(styxPort);
+var jeconbol3Listening = new TcpEndpointHealthCheck(9097);
 
 builder.Services
     .AddHealthChecks()
     .AddAsyncCheck("core-listening", ct => coreListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5))
     .AddAsyncCheck("his-listening", ct => hisListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5))
-    .AddAsyncCheck("styx-listening", ct => styxListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5));
+    .AddAsyncCheck("styx-listening", ct => styxListening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5))
+    .AddAsyncCheck("jeconbol3-listening", ct => jeconbol3Listening.CheckHealthAsync(new HealthCheckContext(), ct), timeout: TimeSpan.FromSeconds(5));
 
 var initJob = builder.AddProject<Projects.Gen4_Local_Init>("init-job");
+
+var jeconbol3Emulator = builder.AddExecutable("jeconbol3-emulator", "dotnet",
+        @"C:\Repos\Lyra3.HP.Jumbo.API\Jeconbol3.Emulator.API\bin\Debug\net8.0",
+        @"C:\Repos\Lyra3.HP.Jumbo.API\Jeconbol3.Emulator.API\bin\Debug\net8.0\Jeconbol3.Emulator.API.dll")
+    .WithEnvironment("JECONBOL3_EMULATOR_API_CONF", Path.Combine(configPath, "Jeconbol3.Emulator.yml"))
+    .WithEndpoint(port: 9097, targetPort: 9097, name: "http", isProxied: false)
+    .WithHealthCheck("jeconbol3-listening");
+
 var hisApi = builder.AddProject<Projects.Gen4_HP_HIS_API>("his-api")
     .WithHealthCheck("his-listening");
 var coreApi = builder.AddProject<Projects.Gen4_HP_Core_API>("core-api")
@@ -103,6 +113,7 @@ hisApi
     .WithEnvironment("HIS_CORE_ENDPOINT", coreApi.GetEndpoint("https").HostPort())
     .WithEndpoint(port: hisPort, scheme: "https", isProxied: false)
     .WaitFor(coreApi)
+    .WaitFor(jeconbol3Emulator)
     .WaitForCompletion(initJob);
 
 coreApi
@@ -146,8 +157,8 @@ var lyra3Auth = builder.AddExecutable("lyra3-auth", "dotnet",
     .WaitFor(rabbitmq);
 
 var lyra3Core = builder.AddExecutable("lyra3-core", "dotnet",
-        @"C:\Shared\Repos\Lyra3.HP.Core.API\Src",
-        @"C:\Shared\Repos\Lyra3.HP.Core.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Core.API.dll")
+        @"C:\Repos\Lyra3.HP.Core.API\Src",
+        @"C:\Repos\Lyra3.HP.Core.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Core.API.dll")
     .WithEnvironment("MVS_LYRA3_CORE_API_SRC", Path.Combine(lyra3ConfigPath, "Core.API.yml"))
     .WithEndpoint(port: 5602, targetPort: 5602, name: "dmz", isProxied: false)
     .WithEndpoint(port: 3302, targetPort: 3302, name: "public", isProxied: false)
@@ -163,8 +174,8 @@ var lyra3Core = builder.AddExecutable("lyra3-core", "dotnet",
 // here are declarative only and must match the yaml. Jumbo additionally blocks in
 // ConfigureAppDependencies until {Auth,Core}AppUri + "api/health" answers, so it needs both waits.
 var lyra3Jumbo = builder.AddExecutable("lyra3-jumbo", "dotnet",
-        @"C:\Shared\Repos\Lyra3.HP.Jumbo.API\Src",
-        @"C:\Shared\Repos\Lyra3.HP.Jumbo.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Jumbo.API.dll")
+        @"C:\Repos\Lyra3.HP.Jumbo.API\Src",
+        @"C:\Repos\Lyra3.HP.Jumbo.API\Src\bin\Debug\net8.0\MVS.Lyra3.HP.Jumbo.API.dll")
     .WithEnvironment("MVS_LYRA3_JUMBO_API_SRC", Path.Combine(lyra3ConfigPath, "Jumbo.API.yml"))
     .WithEndpoint(port: 5042, targetPort: 5042, name: "dmz", isProxied: false)
     .WithEndpoint(port: 3308, targetPort: 3308, name: "public", isProxied: false)
@@ -180,10 +191,16 @@ var smokeTest = builder.AddProject<Projects.Gen4_Local_SmokeTest>("smoke-test")
     .WithEnvironment("HIS_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=his-db")
     .WithEnvironment("CORE_DB_CONNECTION", "Host=localhost;Username=postgres;Password=postgres;Database=core-db")
     .WithEnvironment("LYRA3_CORE_URL", "http://localhost:3302")
+    .WithEnvironment("LYRA3_AUTH_URL", "http://localhost:3304")
+    .WithEnvironment("LYRA3_JUMBO_URL", "http://localhost:3308")
     .WithEnvironment("LYRA3_MONGO_CONNECTION", mongo.Resource.ConnectionStringExpression)
+    .WithEnvironment("JECONBOL_URL", "http://localhost:9097")
+    .WithEnvironment("JECONBOL_OPERATING_ROOM_ID", "11111111-1111-1111-1111-111111111111")
+    .WithEnvironment("JECONBOL_OPERATING_ROOM_EXTERNAL_ID", "00000000-1ada-4f78-a560-ceaa55a10170")
     .WaitFor(styxApi)
     .WaitFor(lyra3Seed)
-    .WaitFor(lyra3Core);
+    .WaitFor(lyra3Core)
+    .WaitFor(jeconbol3Emulator);
 
 builder.Build().Run();
 

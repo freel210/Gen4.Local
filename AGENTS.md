@@ -28,6 +28,21 @@ aspire stop
   first and pass `--no-build`, or set `ASPIRE_CLI_START_TIMEOUT=300`.
 - **Docker Desktop must already be running**; `aspire start` fails without its named pipe.
 
+## Lyra3 → Gen4 import
+
+- **The four imports run in a fixed order** — patients, doctors, operating rooms, planned
+  surgeries: each one resolves references created by the previous.
+  `scripts/import-lyra3.ps1` runs them against the local stack (`his-db` on `localhost:5432`,
+  Mongo on `localhost:27018`, database `Lyra3CoreDb`).
+- **`--batch-size` sets how many records one save covers** (200 by default). A batch that cannot
+  be saved is dropped and the import continues, so `scripts/import-lyra3.ps1 -BatchSize 1` leaves
+  only the records that are actually unimportable.
+- **`Gen4.Local.Lyra3Seed` owns the import cases in Mongo** — valid records, records the importer
+  rejects by rule, and records it cannot save (`externalHisId` longer than the Gen4 column).
+- **The import is verified on demand, not by the smoke test.** Before a clean run
+  `scripts/import-lyra3.ps1 -Reset` stops the AppHost and removes the Postgres and Mongo volumes;
+  the next `aspire start` recreates them, so migrations and the seed run again.
+
 ## Code style
 
 **Code is self-documenting — it is written without comments.**

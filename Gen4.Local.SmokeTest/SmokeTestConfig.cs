@@ -6,7 +6,12 @@ public sealed record SmokeTestConfig(
     string HisDbConnection,
     string CoreDbConnection,
     string Lyra3CoreUrl,
-    string Lyra3MongoConnection)
+    string Lyra3AuthUrl,
+    string Lyra3JumboUrl,
+    string Lyra3MongoConnection,
+    string JeconbolUrl,
+    string JeconbolOperatingRoomId,
+    string JeconbolOperatingRoomExternalId)
 {
     public static SmokeTestConfig FromEnvironment()
     {
@@ -16,7 +21,12 @@ public sealed record SmokeTestConfig(
             Environment.GetEnvironmentVariable("HIS_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=his-db",
             Environment.GetEnvironmentVariable("CORE_DB_CONNECTION") ?? "Host=localhost;Username=postgres;Password=postgres;Database=core-db",
             Environment.GetEnvironmentVariable("LYRA3_CORE_URL") ?? "http://localhost:3302",
-            Environment.GetEnvironmentVariable("LYRA3_MONGO_CONNECTION") ?? "mongodb://root:Passw0rd123@localhost:27018");
+            Environment.GetEnvironmentVariable("LYRA3_AUTH_URL") ?? "http://localhost:3304",
+            Environment.GetEnvironmentVariable("LYRA3_JUMBO_URL") ?? "http://localhost:3308",
+            Environment.GetEnvironmentVariable("LYRA3_MONGO_CONNECTION") ?? "mongodb://root:Passw0rd123@localhost:27018",
+            Environment.GetEnvironmentVariable("JECONBOL_URL") ?? "http://localhost:9097",
+            Environment.GetEnvironmentVariable("JECONBOL_OPERATING_ROOM_ID") ?? "11111111-1111-1111-1111-111111111111",
+            Environment.GetEnvironmentVariable("JECONBOL_OPERATING_ROOM_EXTERNAL_ID") ?? "00000000-1ada-4f78-a560-ceaa55a10170");
     }
 }
 
@@ -25,6 +35,20 @@ public static class TestData
     public const string AdminLogin = "smoketest.admin";
     public const string UserLogin = "smoketest.user";
     public const string Password = "smoketest";
+
+    public const string Lyra3AdminLogin = "admin";
+    public const string Lyra3AdminPassword = "Passw0rd123";
+
+    public const string JeconbolSecondOperatingRoomExternalId = "00000001-1ada-4f78-a560-ceaa55a10170";
+    public const string JeconbolOperatingRoomPartName = "smoketest-jeconbol-or";
+    public const string JeconbolOperatingRoomPartNameUpdated = "smoketest-jeconbol-or-updated";
+    public const string JeconbolSecondRoomPartName = "smoketest-jeconbol-or-2";
+    public const string JeconbolDepartmentPartName = "smoketest-jeconbol-dept";
+    public const string JeconbolFinishedSurgeryIdExtensionUrl = "http://resheine-soft.ru/mvs-finishedsurgery-id";
+    public const string JeconbolOperatorRoleName = "оперирующий хирург";
+    public const string JeconbolExportedState = "exported";
+    public const string JeconbolTestAuthorization = "smoketest-auth";
+    public const int JeconbolImportDaysAhead = 8;
 
     /// <summary>Matches Gen4.HP.Admins.AdminsDefines.AdminPasswordHashWorkFactor.</summary>
     public const int AdminPasswordHashWorkFactor = 12;
@@ -81,6 +105,7 @@ public static class TestData
     public const string DiagnosisName = "Smoke test diagnosis";
     public const string PatientFirstName = "Smoke";
     public const string PatientLastName = "TestPatient";
+    public const string FhirPatientLastName = "SmokeFhirPatient";
 
     public const string SurgeryTypeCode = "SMKT2";
     public const string SurgeryTypeName = "Smoke test surgery type";
@@ -101,4 +126,7 @@ public static class TestData
     public const string ChecklistBlockName = "smoketest-block";
     public const string ChecklistBlockShortName = "smkt";
     public const string ChecklistQuestionText = "Smoke test question";
+
+    public const string AriadnaUrlSetting = "/MVS/Configuration/Integration/HIS/ariadna/Url";
+    public const string AriadnaApiKeySetting = "/MVS/Configuration/Integration/HIS/ariadna/ApiKey";
 }

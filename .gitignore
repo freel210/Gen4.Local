@@ -2,7 +2,4 @@
 **/bin/
 **/.idea/
 **/.vs/
-# Playwright CLI output (may contain credentials)
-.playwright-cli/
-Temp/master-password.txt
 opencode_*.json

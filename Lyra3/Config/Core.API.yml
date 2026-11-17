@@ -45,6 +45,12 @@ CertificateServiceOptions:
   ApplyCertificateCommandName: ""
   ApplyCertificateCommandTimeout: 60
 
+TranslationBroadcastOptions:
+  StopBroadcastingDelay: 12000
+
+S3MaintenanceOptions:
+  OrphanSearchLimit: 1000
+
 PackhausOptions:
   Url: http://127.0.0.1:5062
 
